@@ -40,6 +40,12 @@ param openaiModelDeploymentName string = 'gpt-4o'
 @description('OpenAI model capacity (TPM in thousands)')
 param openaiModelCapacity int = 10
 
+@description('Embedding model deployment name')
+param embeddingDeploymentName string = 'text-embedding-3-large'
+
+@description('Embedding model capacity (TPM in thousands)')
+param embeddingModelCapacity int = 10
+
 // ── Variables ──────────────────────────────────────────────────────
 
 var resourceToken = toLower(uniqueString(subscription().id, resourceGroup().id, environmentName))
@@ -85,6 +91,8 @@ module openai 'modules/openai.bicep' = {
     location: location
     modelDeploymentName: openaiModelDeploymentName
     modelCapacity: openaiModelCapacity
+    embeddingDeploymentName: embeddingDeploymentName
+    embeddingModelCapacity: embeddingModelCapacity
     projectName: foundryProjectName
     searchConnectionName: searchConnectionName
     searchServiceEndpoint: 'https://${searchServiceName}.search.windows.net/'
@@ -123,3 +131,6 @@ output AI_FOUNDRY_PROJECT_NAME string = openai.outputs.projectName
 output AI_FOUNDRY_PROJECT_ENDPOINT string = openai.outputs.projectEndpoint
 output AI_FOUNDRY_PROJECT_PRINCIPAL_ID string = openai.outputs.projectPrincipalId
 output AI_SEARCH_CONNECTION_NAME string = openai.outputs.searchConnectionName
+
+// Embedding model
+output AZURE_OPENAI_EMBEDDING_DEPLOYMENT string = openai.outputs.embeddingDeploymentName

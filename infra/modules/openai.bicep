@@ -1,7 +1,8 @@
 // ─────────────────────────────────────────────────────────────────────
 // infra/modules/openai.bicep
-// Deploys Azure AI Services (OpenAI) account with a gpt-4o deployment,
-// a Foundry-native project, and an AI Search connection on the project.
+// Deploys Azure AI Services (OpenAI) account with gpt-4o and
+// text-embedding-3-large deployments, a Foundry-native project,
+// and an AI Search connection on the project.
 //
 // Uses API version 2025-06-01 which supports:
 //   - allowProjectManagement: true
@@ -26,6 +27,18 @@ param modelVersion string = '2024-11-20'
 
 @description('TPM capacity for the model deployment')
 param modelCapacity int = 10
+
+@description('Embedding model deployment name')
+param embeddingDeploymentName string = 'text-embedding-3-large'
+
+@description('Embedding model name')
+param embeddingModelName string = 'text-embedding-3-large'
+
+@description('Embedding model version')
+param embeddingModelVersion string = '1'
+
+@description('TPM capacity for the embedding model deployment')
+param embeddingModelCapacity int = 10
 
 @description('Name of the Foundry project')
 param projectName string
@@ -65,7 +78,7 @@ resource aiServices 'Microsoft.CognitiveServices/accounts@2025-06-01' = {
   }
 }
 
-// ── Model deployment ──────────────────────────────────────────────
+// ── Chat model deployment ─────────────────────────────────────────
 resource modelDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = {
   parent: aiServices
   name: modelDeploymentName
@@ -82,6 +95,28 @@ resource modelDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-
   }
 }
 
+// ── Embedding model deployment ───────────────────────────────────
+// Required by the Foundry IQ knowledge source for vectorization
+// during OneLake data ingestion.
+resource embeddingDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = {
+  parent: aiServices
+  name: embeddingDeploymentName
+  sku: {
+    name: 'Standard'
+    capacity: embeddingModelCapacity
+  }
+  properties: {
+    model: {
+      format: 'OpenAI'
+      name: embeddingModelName
+      version: embeddingModelVersion
+    }
+  }
+  dependsOn: [
+    modelDeployment
+  ]
+}
+
 // ── Foundry-native project ────────────────────────────────────────
 // Creates a project under the AI Services account (replaces the
 // legacy Hub/Project paradigm from MachineLearningServices).
@@ -94,7 +129,7 @@ resource project 'Microsoft.CognitiveServices/accounts/projects@2025-06-01' = {
   }
   properties: {}
   dependsOn: [
-    modelDeployment
+    embeddingDeployment
   ]
 }
 
@@ -129,6 +164,7 @@ output principalId string = aiServices.identity.principalId
 
 output projectName string = project.name
 output projectPrincipalId string = project.identity.principalId
-output projectEndpoint string = 'https://${aiServices.name}.services.ai.azure.com/api/projects/${project.name}'
+output projectEndpoint string = 'https://${aiServices.name}.openai.azure.com/api/projects/${project.name}'
 
 output searchConnectionName string = searchConnection.name
+output embeddingDeploymentName string = embeddingDeployment.name

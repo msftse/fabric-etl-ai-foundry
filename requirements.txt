@@ -6,6 +6,9 @@ azure-identity>=1.15.0
 azure-mgmt-search>=9.1.0
 azure-mgmt-authorization>=4.0.0
 
+# Azure AI Search — agentic retrieval (knowledge sources, knowledge bases)
+azure-search-documents>=11.7.0b2
+
 # Azure AI Foundry — Agent SDK (v2 preview: Foundry-native project support)
 azure-ai-projects>=2.0.0b4
 openai>=1.82.0

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-04_setup_rbac.py — Grant RBAC role assignments for cross-service access.
+04_setup_rbac.py — Grant RBAC role assignments and create capability hosts.
 
-Role assignments:
+Role assignments (8 total):
   1. AI Search managed identity -> Cognitive Services OpenAI User on OpenAI resource
      (so AI Search can use OpenAI for vectorization)
   2. AI Search managed identity -> Contributor on Fabric workspace
@@ -17,6 +17,12 @@ Role assignments:
      (so the project can manage search resources)
   7. Foundry project identity -> Search Index Data Reader on AI Search
      (so the agent runtime under the project identity can query the index)
+  8. Foundry project identity -> Cognitive Services OpenAI User on AI Services
+     (so the project identity can call OpenAI models for agent + knowledge base)
+
+Capability hosts:
+  - Account-level capability host (enables Agent Service on the AI Services account)
+  - Project-level capability host (enables Agent Service on the Foundry project)
 """
 
 from __future__ import annotations
@@ -24,10 +30,12 @@ from __future__ import annotations
 import sys
 import os
 import uuid
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 from _helpers import load_azd_env, require_env
 
+import requests
 from azure.identity import DefaultAzureCredential
 from azure.mgmt.authorization import AuthorizationManagementClient
 from azure.mgmt.authorization.models import RoleAssignmentCreateParameters
@@ -71,6 +79,71 @@ def assign_role(
             )
         else:
             print(f"    [warn] Role assignment failed ({label}): {e}")
+
+
+def create_capability_hosts(
+    openai_service_id: str,
+    project_name: str,
+    credential: DefaultAzureCredential,
+) -> None:
+    """Create account-level and project-level capability hosts for Agent Service.
+
+    These are required to enable the Agent Service data-plane. Without them,
+    the project endpoint cannot serve agent requests. They provision almost
+    instantly (Succeeded on first poll).
+    """
+    token = credential.get_token("https://management.azure.com/.default")
+    headers = {
+        "Authorization": f"Bearer {token.token}",
+        "Content-Type": "application/json",
+    }
+    body = {"properties": {"capabilityHostKind": "Agents"}}
+
+    # Account-level capability host
+    account_url = (
+        f"https://management.azure.com{openai_service_id}"
+        f"/capabilityHosts/default?api-version=2025-06-01"
+    )
+    print("    Creating account-level capability host...")
+    resp = requests.put(account_url, headers=headers, json=body)
+    if resp.status_code in (200, 201):
+        print("    Account capability host created/exists.")
+    else:
+        print(
+            f"    [warn] Account capability host: {resp.status_code} {resp.text[:300]}"
+        )
+
+    # Wait briefly for account-level to settle before creating project-level
+    time.sleep(5)
+
+    # Project-level capability host
+    project_url = (
+        f"https://management.azure.com{openai_service_id}"
+        f"/projects/{project_name}/capabilityHosts/default"
+        f"?api-version=2025-06-01"
+    )
+    print("    Creating project-level capability host...")
+    resp = requests.put(project_url, headers=headers, json=body)
+    if resp.status_code in (200, 201):
+        print("    Project capability host created/exists.")
+    else:
+        print(
+            f"    [warn] Project capability host: {resp.status_code} {resp.text[:300]}"
+        )
+
+    # Poll for provisioning completion (typically instant)
+    for _ in range(6):
+        time.sleep(5)
+        resp = requests.get(project_url, headers=headers)
+        if resp.status_code == 200:
+            state = resp.json().get("properties", {}).get("provisioningState", "")
+            if state == "Succeeded":
+                print("    Capability hosts provisioned successfully.")
+                return
+            print(f"    Provisioning state: {state}, waiting...")
+    print(
+        "    [warn] Capability host provisioning did not complete in time; continuing."
+    )
 
 
 def main() -> None:
@@ -177,8 +250,30 @@ def main() -> None:
         label="SearchIndexDataReader",
     )
 
-    print("  Done! RBAC role assignments configured (7 assignments).")
+    # ── 8. Foundry project -> Cognitive Services OpenAI User on AI Services ──
+    print("  8. Foundry project -> Cognitive Services OpenAI User on AI Services...")
+    assign_role(
+        auth_client,
+        scope=openai_service_id,
+        role_definition_id=ROLE_COGNITIVE_SERVICES_OPENAI_USER,
+        principal_id=project_principal_id,
+        label="CognitiveServicesOpenAIUser",
+    )
+
+    print("  Done! RBAC role assignments configured (8 assignments).")
     print("  Note: RBAC propagation may take up to 10 minutes.")
+
+    # ── Capability hosts ───────────────────────────────────────────
+    # Required to enable the Agent Service data-plane on the AI Services
+    # account and Foundry project. Without these, the project endpoint
+    # cannot serve agent requests.
+    print()
+    print("  Creating capability hosts for Agent Service...")
+    create_capability_hosts(
+        openai_service_id=openai_service_id,
+        project_name=require_env(env, "AI_FOUNDRY_PROJECT_NAME"),
+        credential=credential,
+    )
 
 
 if __name__ == "__main__":

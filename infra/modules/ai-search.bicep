@@ -1,6 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────
 // infra/modules/ai-search.bicep
-// Deploys Azure AI Search with SystemAssigned managed identity.
+// Deploys Azure AI Search with SystemAssigned managed identity
+// and semantic ranker enabled (required for Foundry IQ agentic retrieval).
 // ─────────────────────────────────────────────────────────────────────
 
 @description('Name of the AI Search service')
@@ -36,6 +37,7 @@ resource searchService 'Microsoft.Search/searchServices@2024-06-01-preview' = {
     partitionCount: 1
     hostingMode: 'default'
     publicNetworkAccess: 'enabled'
+    semanticSearch: 'standard'
   }
 }
 
