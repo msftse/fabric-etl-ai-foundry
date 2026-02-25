@@ -40,7 +40,7 @@ Supports two data sources:
 
 ```
 fabric-etl-ai-foundry/
-├── main.py                              # CLI entry point (9 commands)
+├── main.py                              # CLI entry point (12 commands)
 ├── requirements.txt
 ├── .env.example
 ├── config/
@@ -52,6 +52,9 @@ fabric-etl-ai-foundry/
 │   ├── confluence/
 │   │   ├── client.py                    # Confluence REST API extraction client
 │   │   └── seeder.py                    # Sample data seeder (creates demo content)
+│   ├── fabric/
+│   │   ├── deployer.py                  # Fabric REST API deployer (notebooks + pipeline)
+│   │   └── notebook_content.py          # Notebook .ipynb generators (Bronze/Silver/Gold)
 │   ├── infrastructure/
 │   │   └── fabric_provisioner.py        # Fabric capacity CRUD (azure-mgmt-fabric)
 │   ├── onelake/
@@ -145,6 +148,23 @@ python main.py confluence-seed
 python main.py confluence-etl
 ```
 
+### 11. Deploy Fabric Data Factory pipeline
+
+```bash
+# Deploy notebooks + pipeline to Fabric workspace (idempotent — creates or updates)
+python main.py deploy-pipeline
+```
+
+### 12. Run the pipeline in Fabric
+
+```bash
+# Trigger an on-demand run
+python main.py run-pipeline
+
+# Check run status
+python main.py pipeline-status --pipeline-id <PIPELINE_ID> --job-id <JOB_ID>
+```
+
 ## Confluence ETL Pipeline
 
 The Confluence pipeline extracts **all spaces, pages, and comments** from a Confluence Cloud instance and loads them into OneLake using the Medallion Architecture.
@@ -182,6 +202,43 @@ This dual-write enables the AI Foundry agent's knowledge base to index and searc
 ## Azure Setup (Manual Steps)
 
 The following Azure resources and configurations must be set up **before** running the pipeline. These are one-time setup steps.
+
+### Step 0: Deploy Fabric Data Factory Pipeline (Optional)
+
+As an alternative to running the ETL locally via `python main.py confluence-etl`, you can deploy the pipeline as **Fabric-native Notebooks + Data Factory pipeline** that runs entirely inside the Fabric workspace.
+
+```
+Pipeline: ConfluenceETL
+  ┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
+  │ Bronze Notebook   │────>│ Silver Notebook   │────>│ Gold Notebook     │
+  │ (Extract from     │     │ (HTML strip, parse│     │ (Aggregate, write │
+  │  Confluence API,  │     │  dates, dedup,    │     │  Parquet + CSV)   │
+  │  write Parquet)   │     │  write Parquet+CSV│     │                   │
+  └──────────────────┘     └──────────────────┘     └──────────────────┘
+```
+
+**How it works:**
+
+1. Three self-contained Python notebooks (one per medallion layer) are deployed to the workspace
+2. A Data Factory pipeline chains them in sequence: Bronze -> Silver -> Gold
+3. Each notebook reads/writes via the lakehouse mount point (`/lakehouse/default/Files/`)
+4. The Bronze notebook receives Confluence credentials as parameters from the pipeline
+5. Everything is deployed programmatically via the Fabric REST API — no portal clicks
+
+**Deploy and run:**
+
+```bash
+# Deploy notebooks + pipeline (idempotent — creates or updates)
+python main.py deploy-pipeline
+
+# Trigger an on-demand run
+python main.py run-pipeline
+
+# Check status
+python main.py pipeline-status --pipeline-id <ID> --job-id <JOB_ID>
+```
+
+The deployer (`src/fabric/deployer.py`) also supports **scheduling** via the Fabric Job Scheduler API for recurring runs.
 
 ### Step 1: Create a Fabric Workspace
 
@@ -408,6 +465,7 @@ The AI Foundry agent can be configured with:
 | Storage | OneLake via `azure-storage-file-datalake` (DFS endpoint) |
 | ETL | `pandas` + `pyarrow` for Parquet and CSV read/write |
 | Data Source | `atlassian-python-api` + `beautifulsoup4` for Confluence extraction |
+| Orchestration | Fabric Data Factory pipeline with Notebook activities (deployed via REST API) |
 | AI Agent | `agent-framework[azure]` — Microsoft Agent Framework |
 | Search | Azure AI Search with OneLake indexer + OpenAI embeddings |
 | Auth | `azure-identity` — DefaultAzureCredential |

@@ -152,6 +152,57 @@ class PipelineOrchestrator:
         )
         return gold_tables
 
+    # ── Fabric Data Factory Pipeline ─────────────────────────────────
+
+    def deploy_fabric_pipeline(self) -> dict:
+        """
+        Deploy three Fabric Notebooks (Bronze/Silver/Gold) and a Data Factory
+        pipeline that chains them.  Returns a dict of deployed item metadata.
+        """
+        from src.fabric.deployer import FabricDeployer
+
+        cfg = self._cfg
+        deployer = FabricDeployer(cfg.fabric.workspace_id, cfg.fabric.lakehouse_id)
+        result = deployer.deploy_all(
+            confluence_url=cfg.confluence.url,
+            confluence_email=cfg.confluence.email,
+            confluence_api_token=cfg.confluence.api_token,
+        )
+        return {
+            k: {"id": v.item_id, "name": v.display_name, "type": v.item_type}
+            for k, v in result.items()
+        }
+
+    def run_fabric_pipeline(self, pipeline_item_id: str | None = None) -> str:
+        """
+        Trigger an on-demand run of the ConfluenceETL pipeline.
+
+        If ``pipeline_item_id`` is not provided, the pipeline is looked up
+        by name in the workspace.  Returns the job instance ID.
+        """
+        from src.fabric.deployer import FabricDeployer
+
+        cfg = self._cfg
+        deployer = FabricDeployer(cfg.fabric.workspace_id, cfg.fabric.lakehouse_id)
+
+        if not pipeline_item_id:
+            item = deployer._find_item("ConfluenceETL", "DataPipeline")
+            if not item:
+                raise RuntimeError(
+                    "Pipeline 'ConfluenceETL' not found. Run deploy-pipeline first."
+                )
+            pipeline_item_id = str(item["id"])
+
+        return deployer.run_pipeline(str(pipeline_item_id))
+
+    def get_pipeline_status(self, pipeline_item_id: str, job_instance_id: str) -> dict:
+        """Get the status of a pipeline job instance."""
+        from src.fabric.deployer import FabricDeployer
+
+        cfg = self._cfg
+        deployer = FabricDeployer(cfg.fabric.workspace_id, cfg.fabric.lakehouse_id)
+        return deployer.get_run_status(pipeline_item_id, job_instance_id)
+
     # ── AI Agent ─────────────────────────────────────────────────────
 
     def ask_analyst(self, question: str, gold_data: dict[str, pd.DataFrame]) -> str:

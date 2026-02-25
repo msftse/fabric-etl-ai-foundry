@@ -12,6 +12,11 @@ Usage:
     # Confluence commands
     python -m main confluence-seed       # Populate Confluence with sample data
     python -m main confluence-etl        # Extract from Confluence -> OneLake (Bronze/Silver/Gold)
+
+    # Fabric Data Factory pipeline commands
+    python -m main deploy-pipeline       # Deploy notebooks + pipeline to Fabric workspace
+    python -m main run-pipeline          # Trigger pipeline execution
+    python -m main pipeline-status       # Check run status
 """
 
 from __future__ import annotations
@@ -171,6 +176,58 @@ def confluence_etl():
         click.echo(f"  {name}: {len(df)} rows")
         if not df.empty:
             click.echo(f"    Columns: {', '.join(df.columns[:6])}")
+    click.echo()
+
+
+# ── Fabric Data Factory Pipeline ─────────────────────────────────
+
+
+@cli.command("deploy-pipeline")
+def deploy_pipeline():
+    """Deploy Fabric Notebooks + Data Factory pipeline to the workspace."""
+    orch = PipelineOrchestrator()
+    result = orch.deploy_fabric_pipeline()
+
+    click.echo("\n=== Fabric Data Factory Deployment ===")
+    for role, info in result.items():
+        click.echo(f"  {role}: {info['name']} (id: {info['id']})")
+    click.echo()
+
+
+@cli.command("run-pipeline")
+@click.option(
+    "--pipeline-id",
+    default=None,
+    help="Pipeline item ID (auto-detected if omitted)",
+)
+def run_pipeline(pipeline_id: str | None):
+    """Trigger an on-demand run of the ConfluenceETL pipeline."""
+    orch = PipelineOrchestrator()
+    job_id = orch.run_fabric_pipeline(pipeline_id)
+
+    click.echo(f"\n=== Pipeline Run Triggered ===")
+    click.echo(f"  Job instance ID: {job_id}")
+    click.echo(
+        f"  Check status:    python -m main pipeline-status --pipeline-id <id> --job-id {job_id}"
+    )
+    click.echo()
+
+
+@cli.command("pipeline-status")
+@click.option("--pipeline-id", required=True, help="Pipeline item ID")
+@click.option("--job-id", required=True, help="Job instance ID")
+def pipeline_status(pipeline_id: str, job_id: str):
+    """Check the status of a pipeline run."""
+    orch = PipelineOrchestrator()
+    status = orch.get_pipeline_status(pipeline_id, job_id)
+
+    click.echo(f"\n=== Pipeline Run Status ===")
+    click.echo(f"  Status:       {status.get('status', 'Unknown')}")
+    click.echo(f"  Job type:     {status.get('jobType', '')}")
+    click.echo(f"  Started:      {status.get('startTimeUtc', '')}")
+    click.echo(f"  Ended:        {status.get('endTimeUtc', '')}")
+    if status.get("failureReason"):
+        click.echo(f"  Failure:      {status['failureReason']}")
     click.echo()
 
 
