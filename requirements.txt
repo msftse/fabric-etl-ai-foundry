@@ -1,0 +1,19 @@
+# Azure Fabric Management
+azure-mgmt-fabric>=1.0.0
+azure-identity>=1.15.0
+
+# Azure AI Foundry (Agent Framework)
+agent-framework[azure] --pre
+
+# OneLake / Azure Storage
+azure-storage-file-datalake>=12.14.0
+
+# Data processing
+pandas>=2.1.0
+pyarrow>=14.0.0
+pydantic>=2.5.0
+
+# Utilities
+python-dotenv>=1.0.0
+structlog>=24.1.0
+click>=8.1.0
