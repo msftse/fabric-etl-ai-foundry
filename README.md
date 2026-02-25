@@ -297,6 +297,10 @@ az role assignment create \
    - **Retrieval instructions**: `Search the Confluence ETL data for pages, comments, spaces, author activity, and content aggregations. Prioritize silver and gold layer data for cleaned and aggregated results.`
 6. Save the knowledge base
 
+Below is the agent playground after successful setup — the knowledge base retrieves Confluence data and answers questions:
+
+![AI Foundry Agent Playground](docs/images/agent-playground.png)
+
 ### Troubleshooting
 
 | Symptom | Cause | Fix |
