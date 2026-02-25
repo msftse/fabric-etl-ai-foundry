@@ -1,0 +1,63 @@
+{
+  "name": "Confluence ETL Pipeline",
+  "description": "End-to-end Confluence data extraction and processing using Medallion Architecture (Bronze → Silver → Gold) with Fabric Data Factory pipeline orchestration.",
+  "tasks": [
+    {
+      "id": "task-1",
+      "name": "Extract from Confluence",
+      "description": "Bronze notebook extracts spaces, pages, and comments from Confluence Cloud REST API and writes raw Parquet files to the lakehouse.",
+      "taskType": "Get data",
+      "position": { "x": 100, "y": 200 }
+    },
+    {
+      "id": "task-2",
+      "name": "Store Raw Data",
+      "description": "Raw Confluence data stored as Parquet in the Bronze zone of the lakehouse (confluencelakehouse).",
+      "taskType": "Store data",
+      "position": { "x": 350, "y": 200 }
+    },
+    {
+      "id": "task-3",
+      "name": "Cleanse and Transform",
+      "description": "Silver notebook strips HTML, parses dates, computes word counts, deduplicates, and writes both Parquet and CSV.",
+      "taskType": "Prepare data",
+      "position": { "x": 600, "y": 200 }
+    },
+    {
+      "id": "task-4",
+      "name": "Aggregate for Analytics",
+      "description": "Gold notebook produces 4 business-ready tables: content by space, author activity, content timeline, and most discussed pages.",
+      "taskType": "Analyze and train data",
+      "position": { "x": 850, "y": 200 }
+    },
+    {
+      "id": "task-5",
+      "name": "Orchestrate Pipeline",
+      "description": "Data Factory pipeline (ConfluenceETL) chains the 3 notebooks in sequence: Bronze → Silver → Gold.",
+      "taskType": "General",
+      "position": { "x": 475, "y": 50 }
+    }
+  ],
+  "connectors": [
+    {
+      "startTaskId": "task-1",
+      "endTaskId": "task-2"
+    },
+    {
+      "startTaskId": "task-2",
+      "endTaskId": "task-3"
+    },
+    {
+      "startTaskId": "task-3",
+      "endTaskId": "task-4"
+    },
+    {
+      "startTaskId": "task-5",
+      "endTaskId": "task-1"
+    },
+    {
+      "startTaskId": "task-5",
+      "endTaskId": "task-4"
+    }
+  ]
+}
