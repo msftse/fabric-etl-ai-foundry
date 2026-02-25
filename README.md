@@ -3,6 +3,10 @@
 End-to-end data platform combining **Azure Fabric** (OneLake Medallion Architecture),
 a Python **ETL pipeline**, and an **Azure AI Foundry** agent for automated data analysis.
 
+Supports two data sources:
+- **CSV files** (e.g. e-commerce orders) — loaded via CLI
+- **Confluence Cloud** — extracted via REST API (spaces, pages, comments)
+
 ## Architecture
 
 ```
@@ -12,20 +16,21 @@ a Python **ETL pipeline**, and an **Azure AI Foundry** agent for automated data 
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                     │
 │  ┌──────────┐     ┌──────────┐     ┌──────────┐                   │
-│  │  BRONZE   │────▶│  SILVER   │────▶│   GOLD   │                   │
+│  │  BRONZE   │────>│  SILVER   │────>│   GOLD   │                   │
 │  │  (Raw)    │     │ (Cleansed)│     │(Aggregated)│                  │
 │  └──────────┘     └──────────┘     └─────┬────┘                   │
 │       │                                    │                        │
-│  OneLake DFS   ◀──── Parquet Files ────▶  │                        │
+│  OneLake DFS   <──── Parquet + CSV ────>  │                        │
 │                                            │                        │
 ├────────────────────────────────────────────┼────────────────────────┤
 │                                            │                        │
 │  ┌─────────────────────────────────────────▼──────────────────┐    │
 │  │              AZURE AI FOUNDRY AGENT                         │    │
 │  │  ┌───────────────┐  ┌──────────────┐  ┌───────────────┐   │    │
-│  │  │ Function Tools │  │Code Interpret│  │  Bing Search  │   │    │
-│  │  │ (query data)   │  │ (charts/calc)│  │  (context)    │   │    │
-│  │  └───────────────┘  └──────────────┘  └───────────────┘   │    │
+│  │  │Knowledge Base  │  │Code Interpret│  │  Bing Search  │   │    │
+│  │  │(AI Search +    │  │ (charts/calc)│  │  (context)    │   │    │
+│  │  │ OneLake Index) │  └──────────────┘  └───────────────┘   │    │
+│  │  └───────────────┘                                         │    │
 │  └────────────────────────────────────────────────────────────┘    │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
@@ -35,31 +40,38 @@ a Python **ETL pipeline**, and an **Azure AI Foundry** agent for automated data 
 
 ```
 fabric-etl-ai-foundry/
-├── main.py                          # CLI entry point
+├── main.py                              # CLI entry point (9 commands)
 ├── requirements.txt
 ├── .env.example
 ├── config/
-│   └── settings.py                  # Typed configuration from env vars
+│   └── settings.py                      # Typed configuration from env vars
 ├── data/
 │   └── sample/
-│       └── orders.csv               # Sample e-commerce order data
-└── src/
-    ├── infrastructure/
-    │   └── fabric_provisioner.py    # Fabric capacity CRUD (azure-mgmt-fabric)
-    ├── onelake/
-    │   └── client.py                # OneLake DFS read/write (Parquet)
-    ├── etl/
-    │   ├── bronze/
-    │   │   └── ingestion.py         # Raw CSV → Parquet ingestion
-    │   ├── silver/
-    │   │   └── transform.py         # Cleansing, dedup, type casting
-    │   └── gold/
-    │       └── aggregation.py       # Business aggregations
-    ├── ai_agent/
-    │   └── analyst.py               # AI Foundry data analyst agent
-    ├── orchestrator.py              # E2E pipeline coordinator
-    └── utils/
-        └── logging.py               # Structured logging
+│       └── orders.csv                   # Sample e-commerce order data
+├── src/
+│   ├── confluence/
+│   │   ├── client.py                    # Confluence REST API extraction client
+│   │   └── seeder.py                    # Sample data seeder (creates demo content)
+│   ├── infrastructure/
+│   │   └── fabric_provisioner.py        # Fabric capacity CRUD (azure-mgmt-fabric)
+│   ├── onelake/
+│   │   └── client.py                    # OneLake DFS read/write (Parquet + CSV)
+│   ├── etl/
+│   │   ├── bronze/
+│   │   │   ├── ingestion.py             # Raw CSV -> Parquet ingestion
+│   │   │   └── confluence_ingestion.py  # Confluence -> Bronze (Parquet)
+│   │   ├── silver/
+│   │   │   ├── transform.py            # Orders cleansing, dedup, type casting
+│   │   │   └── confluence_transform.py  # HTML stripping, date parsing (Parquet + CSV)
+│   │   └── gold/
+│   │       ├── aggregation.py           # Orders business aggregations
+│   │       └── confluence_aggregation.py # Confluence aggregations (Parquet + CSV)
+│   ├── ai_agent/
+│   │   └── analyst.py                   # AI Foundry data analyst agent
+│   ├── orchestrator.py                  # E2E pipeline coordinator
+│   └── utils/
+│       └── logging.py                   # Structured logging
+└── tests/                               # (placeholder)
 ```
 
 ## Quick Start
@@ -74,10 +86,10 @@ pip install -r requirements.txt
 
 ```bash
 cp .env.example .env
-# Edit .env with your Azure subscription, resource group, and AI project endpoint
+# Edit .env with your Azure and Confluence credentials (see "Environment Variables" below)
 ```
 
-### 3. Run the ETL pipeline only
+### 3. Run the CSV ETL pipeline
 
 ```bash
 python main.py etl --source data/sample/orders.csv
@@ -103,20 +115,227 @@ python main.py ask --source data/sample/orders.csv \
 python main.py chat --source data/sample/orders.csv
 ```
 
-### 7. Full E2E pipeline (infra + ETL + AI)
+### 7. Stream a response
+
+```bash
+python main.py stream --source data/sample/orders.csv \
+  -q "Provide a comprehensive analysis of the data"
+```
+
+### 8. Full E2E pipeline (infra + ETL + AI)
 
 ```bash
 python main.py full --source data/sample/orders.csv --provision
 ```
 
-### 8. Manage infrastructure
+### 9. Manage infrastructure
 
 ```bash
 python main.py provision   # Create / resume Fabric capacity
 python main.py suspend     # Pause capacity (stops billing)
 ```
 
+### 10. Confluence ETL pipeline
+
+```bash
+# Seed Confluence with sample data (optional — creates ETLDEMO space with pages/comments)
+python main.py confluence-seed
+
+# Run the full Confluence ETL: Extract -> Bronze -> Silver -> Gold in OneLake
+python main.py confluence-etl
+```
+
+## Confluence ETL Pipeline
+
+The Confluence pipeline extracts **all spaces, pages, and comments** from a Confluence Cloud instance and loads them into OneLake using the Medallion Architecture.
+
+### Data Flow
+
+```
+Confluence Cloud REST API
+        │
+        ▼
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│    BRONZE     │────>│    SILVER     │────>│     GOLD      │
+│ Raw JSON data │     │ HTML stripped  │     │ Aggregations  │
+│ (Parquet)     │     │ Dates parsed   │     │ (Parquet+CSV) │
+│               │     │ Deduped        │     │               │
+│ - spaces      │     │ (Parquet+CSV)  │     │ - content by  │
+│ - pages       │     │                │     │   space       │
+│ - comments    │     │ - spaces       │     │ - author      │
+│               │     │ - pages        │     │   activity    │
+│               │     │ - comments     │     │ - content     │
+│               │     │                │     │   timeline    │
+│               │     │                │     │ - most        │
+│               │     │                │     │   discussed   │
+└──────────────┘     └──────────────┘     └──────────────┘
+```
+
+### Why Parquet AND CSV?
+
+The Silver and Gold layers write **both** Parquet and CSV files:
+- **Parquet** — efficient columnar format for analytics queries
+- **CSV** — required for Azure AI Search indexing (AI Search does NOT support Parquet)
+
+This dual-write enables the AI Foundry agent's knowledge base to index and search the data.
+
+## Azure Setup (Manual Steps)
+
+The following Azure resources and configurations must be set up **before** running the pipeline. These are one-time setup steps.
+
+### Step 1: Create a Fabric Workspace
+
+Personal workspaces ("My workspace") do **not** support managed access or external service connections. You must create a named workspace.
+
+```bash
+# Create a named workspace (not "My workspace")
+curl -s -X POST "https://api.fabric.microsoft.com/v1/workspaces" \
+  -H "Authorization: Bearer $(az account get-access-token --resource https://api.fabric.microsoft.com --query accessToken -o tsv)" \
+  -H "Content-Type: application/json" \
+  -d '{"displayName": "confluence-etl"}'
+```
+
+Save the returned workspace `id` as `FABRIC_WORKSPACE_ID` in `.env`.
+
+### Step 2: Assign Workspace to Fabric Capacity
+
+```bash
+# Assign workspace to your Fabric capacity
+curl -s -X POST "https://api.fabric.microsoft.com/v1/workspaces/<WORKSPACE_ID>/assignToCapacity" \
+  -H "Authorization: Bearer $(az account get-access-token --resource https://api.fabric.microsoft.com --query accessToken -o tsv)" \
+  -H "Content-Type: application/json" \
+  -d '{"capacityId": "<CAPACITY_ID>"}'
+```
+
+### Step 3: Create a Lakehouse
+
+Lakehouse names **cannot contain hyphens** (e.g. `confluence-lakehouse` will fail).
+
+```bash
+curl -s -X POST "https://api.fabric.microsoft.com/v1/workspaces/<WORKSPACE_ID>/lakehouses" \
+  -H "Authorization: Bearer $(az account get-access-token --resource https://api.fabric.microsoft.com --query accessToken -o tsv)" \
+  -H "Content-Type: application/json" \
+  -d '{"displayName": "confluencelakehouse"}'
+```
+
+Save the returned lakehouse `id` as `FABRIC_LAKEHOUSE_ID` in `.env`.
+
+### Step 4: Create an Azure AI Search Service
+
+Create an AI Search service (Standard SKU or higher recommended):
+
+```bash
+az search service create \
+  --name <SEARCH_SERVICE_NAME> \
+  --resource-group <RESOURCE_GROUP> \
+  --sku standard \
+  --location <LOCATION>
+```
+
+### Step 5: Enable AI Search Managed Identity
+
+The AI Search service needs a system-assigned managed identity to access OneLake and Azure OpenAI:
+
+```bash
+az search service update \
+  --name <SEARCH_SERVICE_NAME> \
+  --resource-group <RESOURCE_GROUP> \
+  --identity-type SystemAssigned
+```
+
+Note the returned `principalId` — you'll need it for the next steps.
+
+### Step 6: Grant AI Search Access to Fabric Workspace
+
+Grant the AI Search managed identity **Contributor** role on the Fabric workspace so it can read OneLake data:
+
+```bash
+# Get an access token for the Fabric API
+TOKEN=$(az account get-access-token --resource https://api.fabric.microsoft.com --query accessToken -o tsv)
+
+# Grant Contributor role to the AI Search service principal
+curl -s -X POST "https://api.fabric.microsoft.com/v1/workspaces/<WORKSPACE_ID>/roleAssignments" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "principal": {
+      "id": "<AI_SEARCH_PRINCIPAL_ID>",
+      "type": "ServicePrincipal"
+    },
+    "role": "Contributor"
+  }'
+```
+
+### Step 7: Grant AI Search Access to Azure OpenAI (Embeddings)
+
+The AI Search indexer uses Azure OpenAI embeddings for vector search. The managed identity needs the **"Cognitive Services OpenAI User"** role:
+
+```bash
+az role assignment create \
+  --assignee-object-id <AI_SEARCH_PRINCIPAL_ID> \
+  --assignee-principal-type ServicePrincipal \
+  --role "Cognitive Services OpenAI User" \
+  --scope /subscriptions/<SUBSCRIPTION_ID>/resourceGroups/<RESOURCE_GROUP>/providers/Microsoft.CognitiveServices/accounts/<AI_RESOURCE_NAME>
+```
+
+> **This step is critical.** Without it, the AI Search indexer will fail with `PermissionDenied` errors when trying to generate embeddings for the CSV documents.
+
+### Step 8: Create AI Foundry Agent with Knowledge Base
+
+1. Go to **Azure AI Foundry** portal
+2. Open your project
+3. Create a new **Agent** with a deployed chat model (e.g. `gpt-4o`)
+4. Add a **Knowledge Base**:
+   - Click "Create new" > "Microsoft OneLake"
+   - Enter the **Workspace ID** and **Lakehouse ID** from your `.env`
+   - Select the AI Search service created above as the search resource
+   - Wait for the knowledge source status to change from "Creating" to "Ready"
+5. Configure the knowledge base:
+   - **Chat completions model**: your deployed model (e.g. `gpt-4o`)
+   - **Retrieval reasoning effort**: `Medium` or `High` (not Minimal)
+   - **Output mode**: `Generated` for natural-language answers, or `Extractive data` for raw snippets
+   - **Retrieval instructions**: `Search the Confluence ETL data for pages, comments, spaces, author activity, and content aggregations. Prioritize silver and gold layer data for cleaned and aggregated results.`
+6. Save the knowledge base
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Agent returns "I'm unable to access details" | AI Search indexer hasn't indexed data or failed | Check indexer status (see below) |
+| Indexer errors: `PermissionDenied` on embeddings | AI Search identity missing OpenAI RBAC | Run Step 7 above, wait 5 min for propagation, reset & re-run indexer |
+| Indexer warnings: `unsupported content type application/x-parquet` | Normal — Parquet files are skipped by AI Search | Not an error. CSV files are the ones that get indexed. |
+| Indexer warnings: `SplitSkill input missing` | Side-effect of Parquet files having no extractable text | Normal for Parquet files, no action needed |
+| Lakehouse creation fails with "invalid name" | Hyphens in lakehouse name | Use only alphanumeric characters (e.g. `confluencelakehouse`) |
+| Workspace doesn't support managed access | Using personal "My workspace" | Create a named workspace (Step 1) |
+
+#### Checking Indexer Status via API
+
+```bash
+# Get the AI Search admin key
+SEARCH_KEY=$(az search admin-key show \
+  --service-name <SEARCH_SERVICE_NAME> \
+  --resource-group <RESOURCE_GROUP> \
+  --query primaryKey -o tsv)
+
+# List all indexers
+curl -s -H "api-key: $SEARCH_KEY" \
+  "https://<SEARCH_SERVICE_NAME>.search.windows.net/indexers?api-version=2024-07-01"
+
+# Check a specific indexer's execution status
+curl -s -H "api-key: $SEARCH_KEY" \
+  "https://<SEARCH_SERVICE_NAME>.search.windows.net/indexers/<INDEXER_NAME>/status?api-version=2024-07-01"
+
+# Reset and re-run an indexer (after fixing RBAC or data issues)
+curl -s -X POST -H "api-key: $SEARCH_KEY" -H "Content-Length: 0" \
+  "https://<SEARCH_SERVICE_NAME>.search.windows.net/indexers/<INDEXER_NAME>/reset?api-version=2024-07-01"
+
+curl -s -X POST -H "api-key: $SEARCH_KEY" -H "Content-Length: 0" \
+  "https://<SEARCH_SERVICE_NAME>.search.windows.net/indexers/<INDEXER_NAME>/run?api-version=2024-07-01"
+```
+
 ## Medallion Layers
+
+### Orders (CSV source)
 
 | Layer | Purpose | Location in OneLake |
 |-------|---------|---------------------|
@@ -124,11 +343,53 @@ python main.py suspend     # Pause capacity (stops billing)
 | **Silver** | Cleansed: type casting, dedup, derived `total_amount`, filter cancelled | `Files/silver/orders/data.parquet` |
 | **Gold** | Aggregated: `revenue_by_country`, `revenue_by_category`, `daily_revenue`, `top_customers` | `Files/gold/<table>/data.parquet` |
 
+### Confluence (API source)
+
+| Layer | Purpose | Location in OneLake |
+|-------|---------|---------------------|
+| **Bronze** | Raw Confluence data with ingestion metadata | `Files/bronze/confluence_<entity>/data.parquet` |
+| **Silver** | HTML stripped, dates parsed, word counts, deduplicated | `Files/silver/confluence_<entity>/data.parquet` + `data.csv` |
+| **Gold** | Business aggregations for analytics and AI Search | `Files/gold/confluence_<table>/data.parquet` + `data.csv` |
+
+**Confluence Bronze entities**: `confluence_spaces`, `confluence_pages`, `confluence_comments`
+
+**Confluence Gold tables**:
+
+| Table | Description |
+|-------|-------------|
+| `confluence_content_by_space` | Page count, total words, avg word count per space |
+| `confluence_author_activity` | Pages and comments per author, total words written |
+| `confluence_content_timeline` | Content creation aggregated by date |
+| `confluence_most_discussed` | Pages ranked by comment count |
+
+## Environment Variables
+
+Copy `.env.example` to `.env` and fill in:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `AZURE_SUBSCRIPTION_ID` | Yes | Azure subscription ID |
+| `AZURE_RESOURCE_GROUP` | Yes | Resource group for Fabric capacity |
+| `FABRIC_CAPACITY_NAME` | No | Fabric capacity name (default: `etl-fabric-capacity`) |
+| `FABRIC_LOCATION` | No | Azure region (default: `eastus`) |
+| `FABRIC_SKU` | No | Capacity SKU (default: `F2`) |
+| `FABRIC_ADMIN_EMAIL` | Yes | Admin email for Fabric capacity |
+| `FABRIC_WORKSPACE_ID` | Yes | Workspace ID (from Step 1) |
+| `FABRIC_LAKEHOUSE_ID` | Yes | Lakehouse ID (from Step 3) |
+| `ONELAKE_WORKSPACE_NAME` | Yes | Workspace display name |
+| `ONELAKE_LAKEHOUSE_NAME` | Yes | Lakehouse display name |
+| `AZURE_AI_PROJECT_ENDPOINT` | Yes | AI Foundry project endpoint URL |
+| `AZURE_AI_MODEL_DEPLOYMENT_NAME` | No | Model deployment name (default: `gpt-4o`) |
+| `CONFLUENCE_URL` | For Confluence | Confluence Cloud URL (e.g. `https://yoursite.atlassian.net/wiki`) |
+| `CONFLUENCE_EMAIL` | For Confluence | Atlassian account email |
+| `CONFLUENCE_API_TOKEN` | For Confluence | Confluence API token ([create one here](https://id.atlassian.com/manage-profile/security/api-tokens)) |
+
 ## AI Agent Capabilities
 
-The AI Foundry agent (`DataAnalystAgent`) is built with the Microsoft Agent Framework and has:
+The AI Foundry agent can be configured with:
 
-- **5 function tools** that query gold-layer data (revenue by country/category, daily revenue, top customers, data summary)
+- **Knowledge Base** grounded on OneLake data via AI Search (recommended for Confluence data)
+- **5 function tools** that query gold-layer data (for CSV/orders pipeline)
 - **Code Interpreter** for running Python calculations and generating matplotlib charts
 - **Bing Web Search** (optional) for market context
 - **Structured output** mode returning `DataInsight` Pydantic models
@@ -141,8 +402,10 @@ The AI Foundry agent (`DataAnalystAgent`) is built with the Microsoft Agent Fram
 |-----------|-----------|
 | Infrastructure | `azure-mgmt-fabric` — Fabric capacity provisioning |
 | Storage | OneLake via `azure-storage-file-datalake` (DFS endpoint) |
-| ETL | `pandas` + `pyarrow` for Parquet read/write |
+| ETL | `pandas` + `pyarrow` for Parquet and CSV read/write |
+| Data Source | `atlassian-python-api` + `beautifulsoup4` for Confluence extraction |
 | AI Agent | `agent-framework[azure]` — Microsoft Agent Framework |
+| Search | Azure AI Search with OneLake indexer + OpenAI embeddings |
 | Auth | `azure-identity` — DefaultAzureCredential |
 | CLI | `click` |
 | Logging | `structlog` |
@@ -151,5 +414,9 @@ The AI Foundry agent (`DataAnalystAgent`) is built with the Microsoft Agent Fram
 
 1. **Azure Subscription** with Fabric capacity enabled
 2. **Resource Group** for the Fabric capacity
-3. **Azure AI Foundry Project** with a deployed model (e.g. `gpt-4o-mini`)
-4. **(Optional)** Bing Search connection for web search tool
+3. **Fabric Workspace** (named workspace, not "My workspace")
+4. **Fabric Lakehouse** (alphanumeric name only, no hyphens)
+5. **Azure AI Foundry Project** with a deployed model (e.g. `gpt-4o`)
+6. **Azure AI Search Service** (Standard SKU) with system-assigned managed identity
+7. **(Optional)** Bing Search connection for web search tool
+8. **(Optional)** Confluence Cloud instance with API token for Confluence ETL
