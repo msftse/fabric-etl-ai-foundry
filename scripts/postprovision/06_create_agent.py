@@ -18,7 +18,6 @@ from azure.identity import DefaultAzureCredential
 from azure.ai.projects import AIProjectClient
 from azure.ai.projects.models import (
     AzureAISearchTool,
-    ConnectionProperties,
     ConnectionType,
 )
 
@@ -66,8 +65,9 @@ def main() -> None:
         connections = client.connections.list()
         for conn in connections:
             if conn.connection_type in (
-                ConnectionType.COGNITIVE_SEARCH,
+                ConnectionType.AZURE_AI_SEARCH,
                 "CognitiveSearch",
+                "AzureAISearch",
             ):
                 search_connection = conn
                 break

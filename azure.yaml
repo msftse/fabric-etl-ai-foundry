@@ -29,24 +29,31 @@ hooks:
     shell: sh
     run: |
       echo "=== Post-provision: Setting up Fabric, ETL, AI Search, and AI Agent ==="
-      pip install -r requirements.txt --quiet
+
+      # Create or reuse a virtual environment for post-provision scripts
+      if [ ! -d ".venv" ]; then
+        echo "  Creating virtual environment..."
+        python3 -m venv .venv
+      fi
+      . .venv/bin/activate
+      python3 -m pip install -r requirements.txt --quiet
 
       echo "[1/6] Creating Fabric workspace and lakehouse..."
-      python scripts/postprovision/01_setup_fabric.py
+      python3 scripts/postprovision/01_setup_fabric.py
 
       echo "[2/6] Deploying notebooks and pipeline..."
-      python scripts/postprovision/02_deploy_notebooks.py
+      python3 scripts/postprovision/02_deploy_notebooks.py
 
       echo "[3/6] Seeding Confluence and running ETL pipeline..."
-      python scripts/postprovision/03_seed_and_run_etl.py
+      python3 scripts/postprovision/03_seed_and_run_etl.py
 
       echo "[4/6] Setting up RBAC role assignments..."
-      python scripts/postprovision/04_setup_rbac.py
+      python3 scripts/postprovision/04_setup_rbac.py
 
       echo "[5/6] Creating AI Search index on OneLake..."
-      python scripts/postprovision/05_setup_search_index.py
+      python3 scripts/postprovision/05_setup_search_index.py
 
       echo "[6/6] Creating AI Foundry agent..."
-      python scripts/postprovision/06_create_agent.py
+      python3 scripts/postprovision/06_create_agent.py
 
       echo "=== Post-provision complete! ==="

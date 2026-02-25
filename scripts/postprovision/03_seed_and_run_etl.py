@@ -35,13 +35,15 @@ def main() -> None:
             )
             sys.path.insert(0, project_root)
             from src.confluence.seeder import ConfluenceSeeder
+            from config.settings import ConfluenceConfig
 
-            seeder = ConfluenceSeeder(
-                base_url=confluence_url,
+            config = ConfluenceConfig(
+                url=confluence_url,
                 email=confluence_email,
                 api_token=confluence_api_token,
             )
-            result = seeder.seed_all()
+            seeder = ConfluenceSeeder(config=config)
+            result = seeder.seed()
             print(
                 f"    Seeded {result.get('spaces_created', 0)} spaces, "
                 f"{result.get('pages_created', 0)} pages, "

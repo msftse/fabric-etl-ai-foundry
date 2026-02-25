@@ -42,8 +42,8 @@ def main() -> None:
     subscription_id = require_env(env, "AZURE_SUBSCRIPTION_ID")
     resource_group = require_env(env, "AZURE_RESOURCE_GROUP")
     search_name = require_env(env, "AI_SEARCH_SERVICE_NAME")
-    workspace_name = env.get("FABRIC_WORKSPACE_NAME", "confluence-etl")
-    lakehouse_name = env.get("FABRIC_LAKEHOUSE_NAME", "confluencelakehouse")
+    workspace_id = require_env(env, "FABRIC_WORKSPACE_ID")
+    lakehouse_id = require_env(env, "FABRIC_LAKEHOUSE_ID")
 
     search_url = f"https://{search_name}.search.windows.net"
     admin_key = get_search_admin_key(subscription_id, resource_group, search_name)
@@ -100,20 +100,19 @@ def main() -> None:
     # ── 2. Create OneLake data source ──────────────────────────────
     print(f"  Creating OneLake data source '{DATASOURCE_NAME}'...")
 
-    # OneLake connection string for AI Search
-    # Format: ResourceId=/subscriptions/.../providers/Microsoft.Storage/storageAccounts/onelake;
-    onelake_connection = (
-        f"ResourceId=/subscriptions/{subscription_id}"
-        f"/resourceGroups/{resource_group}"
-        f"/providers/Microsoft.Storage/storageAccounts/onelake"
-    )
-    container = f"{workspace_name}/{lakehouse_name}.Lakehouse/Files/gold"
-
+    # OneLake data source format (per Microsoft docs):
+    #   type: "onelake"
+    #   credentials.connectionString: "ResourceId={FabricWorkspaceGuid}"
+    #   container.name: "{LakehouseGuid}"
+    #   container.query: "gold" (subfolder to index)
     datasource_def = {
         "name": DATASOURCE_NAME,
-        "type": "adlsgen2",
-        "credentials": {"connectionString": onelake_connection},
-        "container": {"name": container},
+        "type": "onelake",
+        "credentials": {"connectionString": f"ResourceId={workspace_id}"},
+        "container": {
+            "name": lakehouse_id,
+            "query": "gold",
+        },
     }
 
     resp = requests.put(
@@ -136,6 +135,7 @@ def main() -> None:
             "configuration": {
                 "parsingMode": "delimitedText",
                 "firstLineContainsHeaders": True,
+                "indexedFileNameExtensions": ".csv",
             }
         },
         "schedule": {"interval": "PT1H"},
