@@ -3,12 +3,18 @@
 04_setup_rbac.py — Grant RBAC role assignments for cross-service access.
 
 Role assignments:
-  1. AI Search managed identity -> Contributor on Fabric workspace
-     (so AI Search indexer can read OneLake data)
-  2. AI Search managed identity -> Cognitive Services OpenAI User on OpenAI resource
+  1. AI Search managed identity -> Cognitive Services OpenAI User on OpenAI resource
      (so AI Search can use OpenAI for vectorization)
-  3. Current user -> Cognitive Services OpenAI User on OpenAI resource
-     (so the user can test the agent locally)
+  2. AI Search managed identity -> Contributor on Fabric workspace
+     (so AI Search indexer can read OneLake data)
+  3. AI Services account identity -> Search Index Data Reader on AI Search
+     (so the agent runtime can read index data)
+  4. AI Services account identity -> Search Service Contributor on AI Search
+     (so the agent runtime can manage search resources)
+  5. Foundry project identity -> Search Index Data Contributor on AI Search
+     (so the project can write to the search index)
+  6. Foundry project identity -> Search Service Contributor on AI Search
+     (so the project can manage search resources)
 """
 
 from __future__ import annotations
@@ -28,7 +34,9 @@ from azure.mgmt.authorization.models import RoleAssignmentCreateParameters
 # Well-known role definition IDs
 ROLE_CONTRIBUTOR = "b24988ac-6180-42a0-ab88-20f7382dd24c"
 ROLE_COGNITIVE_SERVICES_OPENAI_USER = "5e0bd9bd-7b93-4f28-af87-19fc36ad61bd"
-ROLE_STORAGE_BLOB_DATA_CONTRIBUTOR = "ba92f5b4-2d11-453d-a403-e96b0029c9fe"
+ROLE_SEARCH_INDEX_DATA_READER = "1407120a-92aa-4202-b7e9-c0e197c71c8f"
+ROLE_SEARCH_INDEX_DATA_CONTRIBUTOR = "8ebe5a00-799e-43f5-93ac-243d3dce84a7"
+ROLE_SEARCH_SERVICE_CONTRIBUTOR = "7ca78c08-252a-4471-8644-bb5ff32d4ba0"
 
 
 def assign_role(
@@ -37,6 +45,7 @@ def assign_role(
     role_definition_id: str,
     principal_id: str,
     principal_type: str = "ServicePrincipal",
+    label: str = "",
 ) -> None:
     """Create a role assignment (idempotent — ignores 409 Conflict)."""
     full_role_id = f"{scope}/providers/Microsoft.Authorization/roleDefinitions/{role_definition_id}"
@@ -52,12 +61,14 @@ def assign_role(
                 principal_type=principal_type,
             ),
         )
-        print(f"    Assigned role {role_definition_id} to {principal_id}")
+        print(f"    Assigned {label or role_definition_id} to {principal_id}")
     except Exception as e:
         if "Conflict" in str(e) or "RoleAssignmentExists" in str(e):
-            print(f"    Role already assigned (idempotent).")
+            print(
+                f"    Role already assigned ({label or role_definition_id}) — idempotent."
+            )
         else:
-            print(f"    [warn] Role assignment failed: {e}")
+            print(f"    [warn] Role assignment failed ({label}): {e}")
 
 
 def main() -> None:
@@ -65,31 +76,28 @@ def main() -> None:
     subscription_id = require_env(env, "AZURE_SUBSCRIPTION_ID")
     resource_group = require_env(env, "AZURE_RESOURCE_GROUP")
     search_principal_id = require_env(env, "AI_SEARCH_PRINCIPAL_ID")
+    search_service_id = require_env(env, "AI_SEARCH_SERVICE_ID")
     openai_service_id = require_env(env, "AZURE_OPENAI_SERVICE_ID")
+    openai_principal_id = require_env(env, "AZURE_OPENAI_PRINCIPAL_ID")
+    project_principal_id = require_env(env, "AI_FOUNDRY_PROJECT_PRINCIPAL_ID")
 
     credential = DefaultAzureCredential()
     auth_client = AuthorizationManagementClient(credential, subscription_id)
 
     # ── 1. AI Search -> Cognitive Services OpenAI User on OpenAI ──
-    print(
-        "  Granting AI Search -> Cognitive Services OpenAI User on OpenAI resource..."
-    )
+    print("  1. AI Search -> Cognitive Services OpenAI User on OpenAI...")
     assign_role(
         auth_client,
         scope=openai_service_id,
         role_definition_id=ROLE_COGNITIVE_SERVICES_OPENAI_USER,
         principal_id=search_principal_id,
-        principal_type="ServicePrincipal",
+        label="CognitiveServicesOpenAIUser",
     )
 
     # ── 2. AI Search -> Contributor on Fabric workspace ────────────
-    # Note: For OneLake access, AI Search needs Contributor on the
-    # Fabric workspace. This is done via the Fabric REST API workspace
-    # role assignments, not ARM RBAC. We'll handle it here as a
-    # best-effort via Fabric API.
     workspace_id = env.get("FABRIC_WORKSPACE_ID", "")
     if workspace_id and search_principal_id:
-        print("  Granting AI Search -> Contributor on Fabric workspace...")
+        print("  2. AI Search -> Contributor on Fabric workspace...")
         try:
             from _helpers import FabricClient
 
@@ -114,8 +122,51 @@ def main() -> None:
                 )
         except Exception as e:
             print(f"    [warn] Fabric workspace role assignment failed: {e}")
+    else:
+        print("  2. [skip] FABRIC_WORKSPACE_ID not set yet — will be set by script 01.")
+
+    # ── 3. AI Services account -> Search Index Data Reader on AI Search ──
+    print("  3. AI Services -> Search Index Data Reader on AI Search...")
+    assign_role(
+        auth_client,
+        scope=search_service_id,
+        role_definition_id=ROLE_SEARCH_INDEX_DATA_READER,
+        principal_id=openai_principal_id,
+        label="SearchIndexDataReader",
+    )
+
+    # ── 4. AI Services account -> Search Service Contributor on AI Search ──
+    print("  4. AI Services -> Search Service Contributor on AI Search...")
+    assign_role(
+        auth_client,
+        scope=search_service_id,
+        role_definition_id=ROLE_SEARCH_SERVICE_CONTRIBUTOR,
+        principal_id=openai_principal_id,
+        label="SearchServiceContributor",
+    )
+
+    # ── 5. Foundry project -> Search Index Data Contributor on AI Search ──
+    print("  5. Foundry project -> Search Index Data Contributor on AI Search...")
+    assign_role(
+        auth_client,
+        scope=search_service_id,
+        role_definition_id=ROLE_SEARCH_INDEX_DATA_CONTRIBUTOR,
+        principal_id=project_principal_id,
+        label="SearchIndexDataContributor",
+    )
+
+    # ── 6. Foundry project -> Search Service Contributor on AI Search ──
+    print("  6. Foundry project -> Search Service Contributor on AI Search...")
+    assign_role(
+        auth_client,
+        scope=search_service_id,
+        role_definition_id=ROLE_SEARCH_SERVICE_CONTRIBUTOR,
+        principal_id=project_principal_id,
+        label="SearchServiceContributor",
+    )
 
     print("  Done! RBAC role assignments configured.")
+    print("  Note: RBAC propagation may take up to 10 minutes.")
 
 
 if __name__ == "__main__":

@@ -6,10 +6,8 @@
 // Resources deployed:
 //   1. Microsoft Fabric capacity (F2)
 //   2. Azure AI Search with managed identity
-//   3. Azure AI Services (OpenAI) with gpt-4o deployment
-//   4. Storage Account (for AI Foundry Hub)
-//   5. Key Vault (for AI Foundry Hub)
-//   6. AI Foundry Hub + Project
+//   3. Azure AI Services (OpenAI) with gpt-4o deployment,
+//      Foundry-native project, and AI Search connection
 //
 // Data-plane items (Fabric workspace, lakehouse, notebooks, pipeline,
 // AI agent) are created by post-provision Python scripts.
@@ -54,10 +52,8 @@ var tags = {
 var fabricCapacityName = 'fc${resourceToken}'
 var searchServiceName = 'search${resourceToken}'
 var openaiServiceName = 'ai${resourceToken}'
-var storageAccountName = 'st${resourceToken}'
-var keyVaultName = 'kv${resourceToken}'
-var hubName = 'hub-${resourceToken}'
-var projectName = 'proj-${resourceToken}'
+var foundryProjectName = 'confluence-agent'
+var searchConnectionName = 'confluence-search'
 
 // ── Modules ────────────────────────────────────────────────────────
 
@@ -89,38 +85,10 @@ module openai 'modules/openai.bicep' = {
     location: location
     modelDeploymentName: openaiModelDeploymentName
     modelCapacity: openaiModelCapacity
-    tags: tags
-  }
-}
-
-module storage 'modules/storage.bicep' = {
-  name: 'storage'
-  params: {
-    name: storageAccountName
-    location: location
-    tags: tags
-  }
-}
-
-module keyVault 'modules/keyvault.bicep' = {
-  name: 'keyVault'
-  params: {
-    name: keyVaultName
-    location: location
-    tags: tags
-  }
-}
-
-module aiFoundry 'modules/ai-foundry.bicep' = {
-  name: 'aiFoundry'
-  params: {
-    hubName: hubName
-    projectName: projectName
-    location: location
-    storageAccountId: storage.outputs.id
-    keyVaultId: keyVault.outputs.id
-    aiServicesId: openai.outputs.id
-    aiServicesEndpoint: openai.outputs.endpoint
+    projectName: foundryProjectName
+    searchConnectionName: searchConnectionName
+    searchServiceEndpoint: 'https://${searchServiceName}.search.windows.net/'
+    searchServiceId: aiSearch.outputs.id
     tags: tags
   }
 }
@@ -147,13 +115,10 @@ output AZURE_OPENAI_SERVICE_NAME string = openai.outputs.name
 output AZURE_OPENAI_SERVICE_ID string = openai.outputs.id
 output AZURE_OPENAI_ENDPOINT string = openai.outputs.endpoint
 output AZURE_OPENAI_MODEL_DEPLOYMENT string = openaiModelDeploymentName
+output AZURE_OPENAI_PRINCIPAL_ID string = openai.outputs.principalId
 
-// AI Foundry
-output AI_FOUNDRY_HUB_NAME string = aiFoundry.outputs.hubName
-output AI_FOUNDRY_PROJECT_NAME string = aiFoundry.outputs.projectName
-output AI_FOUNDRY_PROJECT_ENDPOINT string = aiFoundry.outputs.projectEndpoint
-output AI_FOUNDRY_HUB_PRINCIPAL_ID string = aiFoundry.outputs.hubPrincipalId
-
-// Storage & Key Vault
-output STORAGE_ACCOUNT_NAME string = storage.outputs.name
-output KEY_VAULT_NAME string = keyVault.outputs.name
+// Foundry project
+output AI_FOUNDRY_PROJECT_NAME string = openai.outputs.projectName
+output AI_FOUNDRY_PROJECT_ENDPOINT string = openai.outputs.projectEndpoint
+output AI_FOUNDRY_PROJECT_PRINCIPAL_ID string = openai.outputs.projectPrincipalId
+output AI_SEARCH_CONNECTION_NAME string = openai.outputs.searchConnectionName

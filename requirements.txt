@@ -6,24 +6,17 @@ azure-identity>=1.15.0
 azure-mgmt-search>=9.1.0
 azure-mgmt-authorization>=4.0.0
 
-# Azure AI Foundry — Agent SDK + Agent Framework
-azure-ai-projects>=1.0.0b7
-azure-ai-agents>=1.1.0b3
-agent-framework[azure] --pre
+# Azure AI Foundry — Agent SDK
+azure-ai-projects==1.0.0
+azure-ai-agents>=1.2.0b6
 
 # OneLake / Azure Storage
 azure-storage-file-datalake>=12.14.0
-
-# Snowflake
-snowflake-connector-python>=3.6.0
 
 # Data processing
 pandas>=2.1.0
 pyarrow>=14.0.0
 pydantic>=2.5.0
-
-# Unstructured data extraction
-azure-ai-documentintelligence>=1.0.0
 
 # Confluence
 atlassian-python-api>=3.41.0

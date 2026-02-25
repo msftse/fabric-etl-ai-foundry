@@ -2,8 +2,12 @@
 """
 06_create_agent.py — Create an AI Foundry agent with Azure AI Search tool.
 
-Creates a persistent agent in the AI Foundry project that uses
-AzureAISearchAgentTool to query the OneLake-indexed data in AI Search.
+Creates a persistent agent in the Foundry-native project that uses
+AzureAISearchTool to query the OneLake-indexed Confluence data via
+the AI Search connection provisioned by Bicep.
+
+Uses the Foundry-native project endpoint format:
+  https://<aiServicesName>.services.ai.azure.com/api/projects/<projectName>
 """
 
 from __future__ import annotations
@@ -16,14 +20,11 @@ from _helpers import load_azd_env, require_env
 
 from azure.identity import DefaultAzureCredential
 from azure.ai.projects import AIProjectClient
-from azure.ai.projects.models import (
-    AzureAISearchTool,
-    ConnectionType,
-)
+from azure.ai.agents.models import AzureAISearchTool, AzureAISearchQueryType
 
 
 INDEX_NAME = "confluence-onelake-index"
-AGENT_NAME = "Confluence Data Analyst"
+AGENT_NAME = "confluence-data-analyst"
 AGENT_MODEL = "gpt-4o"
 
 AGENT_INSTRUCTIONS = """You are a Confluence data analyst agent. You help users
@@ -47,10 +48,11 @@ When answering questions:
 def main() -> None:
     env = load_azd_env()
     project_endpoint = require_env(env, "AI_FOUNDRY_PROJECT_ENDPOINT")
-    search_service_name = require_env(env, "AI_SEARCH_SERVICE_NAME")
+    search_connection_name = require_env(env, "AI_SEARCH_CONNECTION_NAME")
 
     print(f"  Creating AI Foundry agent '{AGENT_NAME}'...")
     print(f"  Project endpoint: {project_endpoint}")
+    print(f"  Search connection: {search_connection_name}")
 
     credential = DefaultAzureCredential()
     client = AIProjectClient(
@@ -58,54 +60,41 @@ def main() -> None:
         credential=credential,
     )
 
-    # Get the AI Search connection from the project
-    # The connection was created by Bicep as part of the Hub
-    search_connection = None
+    # ── Get the AI Search connection from the project ──────────────
+    print(f"  Looking up connection '{search_connection_name}'...")
     try:
-        connections = client.connections.list()
-        for conn in connections:
-            if conn.connection_type in (
-                ConnectionType.AZURE_AI_SEARCH,
-                "CognitiveSearch",
-                "AzureAISearch",
-            ):
-                search_connection = conn
-                break
+        conn = client.connections.get(search_connection_name)
+        print(f"    Found connection: {conn.name} (id={conn.id})")
+        print(f"    Target: {conn.target}")
     except Exception as e:
-        print(f"    [warn] Could not list connections: {e}")
+        print(f"    [error] Could not get connection '{search_connection_name}': {e}")
+        print("    Ensure the Bicep deployment created the connection.")
+        return
 
-    # Create the AI Search tool
-    tools = []
-    tool_resources = {}
+    # ── Create the AI Search tool ──────────────────────────────────
+    ai_search = AzureAISearchTool(
+        index_connection_id=conn.id,
+        index_name=INDEX_NAME,
+        query_type=AzureAISearchQueryType.SIMPLE,
+        top_k=5,
+    )
 
-    if search_connection:
-        print(f"    Using AI Search connection: {search_connection.id}")
-        ai_search_tool = AzureAISearchTool()
-        ai_search_tool.add_index(
-            connection_id=search_connection.id,
-            index_name=INDEX_NAME,
-        )
-        tools.extend(ai_search_tool.definitions)
-        tool_resources.update(ai_search_tool.resources)
-    else:
-        print("    [warn] No AI Search connection found in project.")
-        print("    Creating agent without search tool (you can add it manually).")
-
-    # Create the agent
+    # ── Create the agent ───────────────────────────────────────────
     try:
         agent = client.agents.create_agent(
             model=AGENT_MODEL,
             name=AGENT_NAME,
             instructions=AGENT_INSTRUCTIONS,
-            tools=tools if tools else None,
-            tool_resources=tool_resources if tool_resources else None,
+            tools=ai_search.definitions,
+            tool_resources=ai_search.resources,
         )
         print(f"    Agent created! ID: {agent.id}")
         print(f"    Name: {agent.name}")
         print(f"    Model: {agent.model}")
     except Exception as e:
         print(f"    [error] Agent creation failed: {e}")
-        print("    You can create the agent manually in AI Foundry Studio.")
+        print("    This may happen if RBAC roles haven't propagated yet.")
+        print("    Wait 5-10 minutes and re-run this script.")
         return
 
     print("  Done! AI Foundry agent is ready.")

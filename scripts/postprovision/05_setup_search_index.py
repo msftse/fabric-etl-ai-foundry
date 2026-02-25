@@ -52,7 +52,7 @@ def main() -> None:
         "Content-Type": "application/json",
         "api-key": admin_key,
     }
-    api_version = "2024-07-01"
+    api_version = "2025-09-01"
 
     # ── 1. Create index ────────────────────────────────────────────
     print(f"  Creating search index '{INDEX_NAME}'...")
@@ -92,7 +92,7 @@ def main() -> None:
         headers=headers,
         json=index_def,
     )
-    if resp.status_code in (200, 201):
+    if resp.status_code in (200, 201, 204):
         print(f"    Index created/updated.")
     else:
         print(f"    Index response: {resp.status_code} {resp.text}")
@@ -104,14 +104,15 @@ def main() -> None:
     #   type: "onelake"
     #   credentials.connectionString: "ResourceId={FabricWorkspaceGuid}"
     #   container.name: "{LakehouseGuid}"
-    #   container.query: "gold" (subfolder to index)
+    # Note: We index all CSV files in the lakehouse (bronze/silver/gold).
+    # The "query" subfolder param doesn't reliably resolve for nested paths,
+    # so we use indexedFileNameExtensions to limit to .csv files only.
     datasource_def = {
         "name": DATASOURCE_NAME,
         "type": "onelake",
         "credentials": {"connectionString": f"ResourceId={workspace_id}"},
         "container": {
             "name": lakehouse_id,
-            "query": "gold",
         },
     }
 
@@ -120,7 +121,7 @@ def main() -> None:
         headers=headers,
         json=datasource_def,
     )
-    if resp.status_code in (200, 201):
+    if resp.status_code in (200, 201, 204):
         print(f"    Data source created/updated.")
     else:
         print(f"    Data source response: {resp.status_code} {resp.text}")
@@ -133,8 +134,7 @@ def main() -> None:
         "targetIndexName": INDEX_NAME,
         "parameters": {
             "configuration": {
-                "parsingMode": "delimitedText",
-                "firstLineContainsHeaders": True,
+                "dataToExtract": "contentAndMetadata",
                 "indexedFileNameExtensions": ".csv",
             }
         },
