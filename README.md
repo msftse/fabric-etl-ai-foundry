@@ -3,16 +3,104 @@
 End-to-end data platform combining **Azure Fabric** (OneLake Medallion Architecture),
 a Python **ETL pipeline**, and an **Azure AI Foundry** agent for automated data analysis.
 
-Supports two data sources:
-- **CSV files** (e.g. e-commerce orders) — loaded via CLI
-- **Confluence Cloud** — extracted via REST API (spaces, pages, comments)
+A single `azd up` command provisions all Azure resources, deploys Fabric notebooks and
+Data Factory pipeline, seeds Confluence with sample data, runs the ETL, indexes data into
+Azure AI Search, and creates an AI Foundry agent connected to OneLake.
+
+## Deploy with `azd up`
+
+### Prerequisites
+
+- [Azure Developer CLI (`azd`)](https://aka.ms/azd-install) v1.5+
+- [Azure CLI (`az`)](https://learn.microsoft.com/cli/azure/install-azure-cli) v2.60+
+- Python 3.10+
+- An Azure subscription with:
+  - **Microsoft Fabric** resource provider registered
+  - **Cognitive Services** resource provider registered
+  - Permissions to create resource groups and role assignments
+- A **Confluence Cloud** instance with an API token ([create one here](https://id.atlassian.com/manage-profile/security/api-tokens))
+
+### One-Command Deployment
+
+```bash
+# Clone the repo
+git clone https://github.com/msftse/fabric-etl-ai-foundry.git
+cd fabric-etl-ai-foundry
+
+# Log in to Azure
+azd auth login
+az login
+
+# Deploy everything
+azd up
+```
+
+`azd up` will prompt you for:
+- **Environment name** — used as a suffix for all resource names
+- **Azure location** — region for resource deployment (e.g. `westus3`)
+- **Fabric admin email** — your Azure AD email for Fabric capacity admin
+- **Confluence URL** — your Confluence Cloud URL (e.g. `https://yoursite.atlassian.net/wiki`)
+- **Confluence email** — your Atlassian account email
+- **Confluence API token** — your Confluence API token
+
+### What Gets Deployed
+
+**Phase 1 — `azd provision` (Bicep)** creates Azure resources:
+
+| Resource | Bicep Module | Purpose |
+|----------|-------------|---------|
+| Microsoft Fabric Capacity (F2) | `fabric-capacity.bicep` | Compute for Fabric workspace |
+| Azure AI Search (Standard) | `ai-search.bicep` | Index OneLake data with managed identity |
+| Azure AI Services + gpt-4o | `openai.bicep` | Chat model + embeddings for AI agent |
+| Storage Account | `storage.bicep` | Backing store for AI Foundry Hub |
+| Key Vault | `keyvault.bicep` | Secrets for AI Foundry Hub |
+| AI Foundry Hub + Project | `ai-foundry.bicep` | AI agent hosting environment |
+
+**Phase 2 — `postprovision` hooks** run 6 Python scripts:
+
+| Script | Purpose |
+|--------|---------|
+| `01_setup_fabric.py` | Create Fabric workspace + lakehouse via REST API |
+| `02_deploy_notebooks.py` | Deploy 3 medallion notebooks + Data Factory pipeline |
+| `03_seed_and_run_etl.py` | Seed Confluence with sample data + trigger pipeline |
+| `04_setup_rbac.py` | Grant AI Search managed identity access to Fabric + OpenAI |
+| `05_setup_search_index.py` | Create AI Search index, OneLake data source, indexer |
+| `06_create_agent.py` | Create AI Foundry agent with AzureAISearchTool |
+
+### Tear Down
+
+```bash
+azd down --purge
+```
+
+### GitHub Codespaces
+
+This repo includes a `.devcontainer` configuration. Click **Code > Codespaces > New codespace** on GitHub to get a ready-to-use environment with `azd`, `az`, and Python pre-installed.
 
 ## Architecture
 
 ```
+                         azd up
+                           │
+            ┌──────────────┴──────────────┐
+            ▼                              ▼
+    Phase 1: Bicep                Phase 2: Python Scripts
+    (ARM Resources)               (Data-Plane Resources)
+    ┌─────────────────┐           ┌──────────────────────┐
+    │ Fabric Capacity  │           │ Fabric Workspace     │
+    │ AI Search        │           │ Fabric Lakehouse     │
+    │ AI Services      │──outputs─>│ 3 Notebooks          │
+    │ Storage Account  │  (env)    │ Data Factory Pipeline│
+    │ Key Vault        │           │ Confluence Seed + ETL│
+    │ AI Hub + Project │           │ RBAC Assignments     │
+    └─────────────────┘           │ Search Index+Indexer │
+                                   │ AI Foundry Agent     │
+                                   └──────────────────────┘
+```
+
+```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        AZURE FABRIC CAPACITY                        │
-│                     (Provisioned via azure-mgmt-fabric)             │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                     │
 │  ┌──────────┐     ┌──────────┐     ┌──────────┐                   │
@@ -40,6 +128,31 @@ Supports two data sources:
 
 ```
 fabric-etl-ai-foundry/
+├── azure.yaml                           # azd project config with postprovision hooks
+├── infra/
+│   ├── main.bicep                       # Bicep orchestrator (6 modules, ~20 outputs)
+│   ├── main.parameters.json             # Default params with azd env var references
+│   └── modules/
+│       ├── fabric-capacity.bicep        # Microsoft.Fabric/capacities (F2)
+│       ├── ai-search.bicep              # AI Search with managed identity
+│       ├── openai.bicep                 # AI Services + gpt-4o deployment
+│       ├── storage.bicep                # Storage account for AI Foundry
+│       ├── keyvault.bicep               # Key Vault for AI Foundry
+│       └── ai-foundry.bicep             # AI Hub + AIServices connection + Project
+├── scripts/postprovision/
+│   ├── _helpers.py                      # Shared utilities (azd env, FabricClient)
+│   ├── 01_setup_fabric.py              # Fabric workspace + lakehouse
+│   ├── 02_deploy_notebooks.py          # Notebook + pipeline deployment
+│   ├── 03_seed_and_run_etl.py          # Confluence seed + pipeline trigger
+│   ├── 04_setup_rbac.py                # RBAC role assignments
+│   ├── 05_setup_search_index.py        # AI Search index/datasource/indexer
+│   └── 06_create_agent.py              # AI Foundry agent creation
+├── notebooks/
+│   ├── bronze_confluence_extract.ipynb  # Bronze notebook ({{PLACEHOLDER}} tokens)
+│   ├── silver_confluence_transform.ipynb # Silver notebook
+│   └── gold_confluence_aggregation.ipynb # Gold notebook
+├── .devcontainer/
+│   └── devcontainer.json               # GitHub Codespaces config
 ├── main.py                              # CLI entry point (12 commands)
 ├── requirements.txt
 ├── .env.example
@@ -54,7 +167,7 @@ fabric-etl-ai-foundry/
 │   │   └── seeder.py                    # Sample data seeder (creates demo content)
 │   ├── fabric/
 │   │   ├── deployer.py                  # Fabric REST API deployer (notebooks + pipeline)
-│   │   └── notebook_content.py          # Notebook .ipynb generators (Bronze/Silver/Gold)
+│   │   └── notebook_content.py          # Notebook .ipynb file loader
 │   ├── infrastructure/
 │   │   └── fabric_provisioner.py        # Fabric capacity CRUD (azure-mgmt-fabric)
 │   ├── onelake/
@@ -77,7 +190,11 @@ fabric-etl-ai-foundry/
 └── tests/                               # (placeholder)
 ```
 
-## Quick Start
+## Quick Start (CLI — manual mode)
+
+> **Prefer `azd up`?** See [Deploy with azd up](#deploy-with-azd-up) above for the automated path.
+>
+> The CLI below is useful for running individual steps against an **existing** Fabric workspace.
 
 ### 1. Install dependencies
 
@@ -199,7 +316,7 @@ The Silver and Gold layers write **both** Parquet and CSV files:
 
 This dual-write enables the AI Foundry agent's knowledge base to index and search the data.
 
-## Azure Setup (Manual Steps)
+## Azure Setup (Manual Steps — alternative to `azd up`)
 
 The following Azure resources and configurations must be set up **before** running the pipeline. These are one-time setup steps.
 
@@ -473,6 +590,8 @@ The AI Foundry agent can be configured with:
 | Logging | `structlog` |
 
 ## Required Azure Resources
+
+All of the following are provisioned automatically by `azd up`. For manual setup, see [Azure Setup](#azure-setup-manual-steps--alternative-to-azd-up) above.
 
 1. **Azure Subscription** with Fabric capacity enabled
 2. **Resource Group** for the Fabric capacity

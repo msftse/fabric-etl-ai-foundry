@@ -1,0 +1,25 @@
+{
+  "name": "Fabric ETL + AI Foundry",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+  "features": {
+    "ghcr.io/devcontainers/features/azure-cli:1": {},
+    "ghcr.io/azure/azure-dev/azd:latest": {}
+  },
+  "postCreateCommand": "pip install -r requirements.txt",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-azuretools.azure-dev",
+        "ms-azuretools.vscode-bicep"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python"
+      }
+    }
+  },
+  "forwardPorts": [],
+  "remoteEnv": {
+    "AZURE_DEV_COLLECT_TELEMETRY": "no"
+  }
+}

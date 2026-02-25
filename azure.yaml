@@ -1,0 +1,52 @@
+# ─────────────────────────────────────────────────────────────────────
+# azure.yaml — Azure Developer CLI (azd) project configuration
+#
+# Run `azd up` to provision all Azure resources and configure the
+# Confluence ETL pipeline end-to-end.
+# ─────────────────────────────────────────────────────────────────────
+name: fabric-etl-ai-foundry
+metadata:
+  template: fabric-etl-ai-foundry
+
+infra:
+  provider: bicep
+  path: infra
+
+# ── Prompted secrets ────────────────────────────────────────────────
+# azd prompts the user for these values during `azd provision` and
+# stores them in the local environment (.azure/<env>/.env).
+# They flow to post-provision scripts via `azd env get-values`.
+pipeline:
+  variables:
+    - CONFLUENCE_URL
+    - CONFLUENCE_EMAIL
+    - CONFLUENCE_API_TOKEN
+
+# ── Hooks ───────────────────────────────────────────────────────────
+hooks:
+  # Phase 2 — Data-plane setup (Fabric, Notebooks, ETL, RBAC, Search, Agent)
+  postprovision:
+    shell: sh
+    run: |
+      echo "=== Post-provision: Setting up Fabric, ETL, AI Search, and AI Agent ==="
+      pip install -r requirements.txt --quiet
+
+      echo "[1/6] Creating Fabric workspace and lakehouse..."
+      python scripts/postprovision/01_setup_fabric.py
+
+      echo "[2/6] Deploying notebooks and pipeline..."
+      python scripts/postprovision/02_deploy_notebooks.py
+
+      echo "[3/6] Seeding Confluence and running ETL pipeline..."
+      python scripts/postprovision/03_seed_and_run_etl.py
+
+      echo "[4/6] Setting up RBAC role assignments..."
+      python scripts/postprovision/04_setup_rbac.py
+
+      echo "[5/6] Creating AI Search index on OneLake..."
+      python scripts/postprovision/05_setup_search_index.py
+
+      echo "[6/6] Creating AI Foundry agent..."
+      python scripts/postprovision/06_create_agent.py
+
+      echo "=== Post-provision complete! ==="
