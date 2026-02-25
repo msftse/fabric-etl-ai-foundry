@@ -77,6 +77,27 @@ class OneLakeClient:
         log.info("onelake_write_done", path=path, size_bytes=buf.tell())
         return path
 
+    def write_csv(self, df: pd.DataFrame, layer: str, table: str) -> str:
+        """
+        Write a DataFrame as CSV into OneLake under the specified
+        medallion layer.  CSV is indexable by Azure AI Search / Foundry IQ
+        (unlike Parquet).
+
+        Returns the OneLake path written to.
+        """
+        path = self._lakehouse_path(layer, table, filename="data.csv")
+        log.info("onelake_write_csv", path=path, rows=len(df))
+
+        buf = io.BytesIO()
+        df.to_csv(buf, index=False)
+        buf.seek(0)
+
+        file_client = self._fs.get_file_client(path)
+        file_client.upload_data(buf.getvalue(), overwrite=True)
+
+        log.info("onelake_write_csv_done", path=path, size_bytes=buf.tell())
+        return path
+
     # ── Read ──────────────────────────────────────────────────────────
 
     def read_parquet(self, layer: str, table: str) -> pd.DataFrame:

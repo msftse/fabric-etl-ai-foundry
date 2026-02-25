@@ -8,6 +8,10 @@ Usage:
     python -m main provision
     python -m main suspend
     python -m main full      --source data/sample/orders.csv
+
+    # Confluence commands
+    python -m main confluence-seed       # Populate Confluence with sample data
+    python -m main confluence-etl        # Extract from Confluence -> OneLake (Bronze/Silver/Gold)
 """
 
 from __future__ import annotations
@@ -136,6 +140,38 @@ def suspend():
     orch = PipelineOrchestrator()
     orch.teardown_infrastructure()
     click.echo("Capacity suspended — billing stopped.")
+
+
+# ── Confluence ───────────────────────────────────────────────────────
+
+
+@cli.command("confluence-seed")
+def confluence_seed():
+    """Populate Confluence Cloud with sample pages, spaces, and comments."""
+    orch = PipelineOrchestrator()
+    summary = orch.seed_confluence()
+
+    click.echo("\n=== Confluence Seed Summary ===")
+    click.echo(f"  Space: {summary['space']}")
+    click.echo(f"  Pages created: {len(summary['pages'])}")
+    for title in summary["pages"]:
+        click.echo(f"    - {title}")
+    click.echo(f"  Comments added: {summary['comments']}")
+    click.echo()
+
+
+@cli.command("confluence-etl")
+def confluence_etl():
+    """Extract data from Confluence -> OneLake (Bronze/Silver/Gold)."""
+    orch = PipelineOrchestrator()
+    gold = orch.run_confluence_etl()
+
+    click.echo("\n=== Confluence Gold Layer Summary ===")
+    for name, df in gold.items():
+        click.echo(f"  {name}: {len(df)} rows")
+        if not df.empty:
+            click.echo(f"    Columns: {', '.join(df.columns[:6])}")
+    click.echo()
 
 
 # ── Full E2E ─────────────────────────────────────────────────────────
