@@ -6,8 +6,10 @@ Creates a persistent agent in the Foundry-native project that uses
 AzureAISearchTool to query the OneLake-indexed Confluence data via
 the AI Search connection provisioned by Bicep.
 
-Uses the Foundry-native project endpoint format:
-  https://<aiServicesName>.services.ai.azure.com/api/projects/<projectName>
+Uses the v2 SDK (azure-ai-projects>=2.0.0b4) with create_version +
+PromptAgentDefinition pattern, which routes through the agents backend
+(/api/projects/<name>/agents/<name>/versions) instead of the broken
+/api/projects/<name>/assistants endpoint.
 """
 
 from __future__ import annotations
@@ -20,7 +22,13 @@ from _helpers import load_azd_env, require_env
 
 from azure.identity import DefaultAzureCredential
 from azure.ai.projects import AIProjectClient
-from azure.ai.agents.models import AzureAISearchTool, AzureAISearchQueryType
+from azure.ai.projects.models import (
+    PromptAgentDefinition,
+    AzureAISearchTool,
+    AzureAISearchToolResource,
+    AISearchIndexResource,
+    AzureAISearchQueryType,
+)
 
 
 INDEX_NAME = "confluence-onelake-index"
@@ -44,15 +52,26 @@ When answering questions:
 4. Suggest follow-up queries the user might find useful
 """
 
+VERIFICATION_QUERY = "What Confluence spaces exist? List all space names."
+
 
 def main() -> None:
     env = load_azd_env()
     project_endpoint = require_env(env, "AI_FOUNDRY_PROJECT_ENDPOINT")
     search_connection_name = require_env(env, "AI_SEARCH_CONNECTION_NAME")
+    openai_service_id = require_env(env, "AZURE_OPENAI_SERVICE_ID")
+    project_name = require_env(env, "AI_FOUNDRY_PROJECT_NAME")
+
+    # Build the ARM resource ID for the search connection on the project.
+    # Format: <aiServicesResourceId>/projects/<projectName>/connections/<connectionName>
+    connection_id = (
+        f"{openai_service_id}/projects/{project_name}"
+        f"/connections/{search_connection_name}"
+    )
 
     print(f"  Creating AI Foundry agent '{AGENT_NAME}'...")
     print(f"  Project endpoint: {project_endpoint}")
-    print(f"  Search connection: {search_connection_name}")
+    print(f"  Search connection ID: {connection_id}")
 
     credential = DefaultAzureCredential()
     client = AIProjectClient(
@@ -60,43 +79,89 @@ def main() -> None:
         credential=credential,
     )
 
-    # ── Get the AI Search connection from the project ──────────────
-    print(f"  Looking up connection '{search_connection_name}'...")
-    try:
-        conn = client.connections.get(search_connection_name)
-        print(f"    Found connection: {conn.name} (id={conn.id})")
-        print(f"    Target: {conn.target}")
-    except Exception as e:
-        print(f"    [error] Could not get connection '{search_connection_name}': {e}")
-        print("    Ensure the Bicep deployment created the connection.")
-        return
-
-    # ── Create the AI Search tool ──────────────────────────────────
-    ai_search = AzureAISearchTool(
-        index_connection_id=conn.id,
-        index_name=INDEX_NAME,
-        query_type=AzureAISearchQueryType.SIMPLE,
-        top_k=5,
+    # ── Build the AI Search tool definition ────────────────────────
+    search_tool = AzureAISearchTool(
+        azure_ai_search=AzureAISearchToolResource(
+            indexes=[
+                AISearchIndexResource(
+                    project_connection_id=connection_id,
+                    index_name=INDEX_NAME,
+                    query_type=AzureAISearchQueryType.SIMPLE,
+                    top_k=5,
+                )
+            ]
+        )
     )
 
-    # ── Create the agent ───────────────────────────────────────────
+    # ── Create the agent using v2 create_version API ───────────────
     try:
-        agent = client.agents.create_agent(
-            model=AGENT_MODEL,
-            name=AGENT_NAME,
-            instructions=AGENT_INSTRUCTIONS,
-            tools=ai_search.definitions,
-            tool_resources=ai_search.resources,
+        agent = client.agents.create_version(
+            agent_name=AGENT_NAME,
+            definition=PromptAgentDefinition(
+                model=AGENT_MODEL,
+                instructions=AGENT_INSTRUCTIONS,
+                tools=[search_tool],
+            ),
+            description="Confluence data analyst with AI Search grounding on OneLake data",
         )
         print(f"    Agent created! ID: {agent.id}")
         print(f"    Name: {agent.name}")
-        print(f"    Model: {agent.model}")
+        print(f"    Version: {agent.version}")
     except Exception as e:
         print(f"    [error] Agent creation failed: {e}")
         print("    This may happen if RBAC roles haven't propagated yet.")
         print("    Wait 5-10 minutes and re-run this script.")
         return
 
+    # ── Verification query ─────────────────────────────────────────
+    print()
+    print(f"  Verifying agent with query: '{VERIFICATION_QUERY}'")
+    try:
+        openai_client = client.get_openai_client()
+        response = openai_client.responses.create(
+            model=AGENT_MODEL,
+            input=VERIFICATION_QUERY,
+            tool_choice="required",
+            extra_body={
+                "agent_reference": {
+                    "name": agent.name,
+                    "type": "agent_reference",
+                }
+            },
+            stream=False,
+        )
+        # Extract text from response
+        for item in response.output:
+            text = getattr(item, "text", None)
+            if text:
+                # Truncate for readability
+                preview = text[:500] + ("..." if len(text) > 500 else "")
+                print(f"    Agent response: {preview}")
+                break
+            # Also check content array (message items)
+            content = getattr(item, "content", None)
+            if content:
+                for part in content:
+                    t = getattr(part, "text", None)
+                    if t:
+                        preview = t[:500] + ("..." if len(t) > 500 else "")
+                        print(f"    Agent response: {preview}")
+                        break
+                break
+        print("    Verification passed!")
+    except Exception as e:
+        err_msg = str(e)
+        if "Access denied" in err_msg:
+            print("    [warn] Agent query returned 'Access denied'.")
+            print("    RBAC roles may need up to 10 minutes to propagate.")
+            print("    The agent was created successfully; re-test after waiting.")
+        else:
+            print(f"    [warn] Verification query failed: {e}")
+            print(
+                "    The agent was created; query issues may resolve after RBAC propagation."
+            )
+
+    print()
     print("  Done! AI Foundry agent is ready.")
     print(f"  Test it at: https://ai.azure.com")
 

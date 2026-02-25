@@ -1,3 +1,9 @@
+<p align="center">
+  <img src="docs/images/fabric-logo.png" alt="Microsoft Fabric" height="80" />
+  &nbsp;&nbsp;&nbsp;
+  <img src="docs/images/azure-logo.svg" alt="Microsoft Azure" height="80" />
+</p>
+
 # Fabric ETL + AI Foundry — Medallion Architecture E2E Project
 
 End-to-end data platform combining **Azure Fabric** (OneLake Medallion Architecture),

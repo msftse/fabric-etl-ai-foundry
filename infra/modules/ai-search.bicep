@@ -42,3 +42,6 @@ resource searchService 'Microsoft.Search/searchServices@2024-06-01-preview' = {
 output id string = searchService.id
 output name string = searchService.name
 output principalId string = searchService.identity.principalId
+
+#disable-next-line outputs-should-not-contain-secrets
+output adminKey string = searchService.listAdminKeys().primaryKey

@@ -89,6 +89,7 @@ module openai 'modules/openai.bicep' = {
     searchConnectionName: searchConnectionName
     searchServiceEndpoint: 'https://${searchServiceName}.search.windows.net/'
     searchServiceId: aiSearch.outputs.id
+    searchApiKey: aiSearch.outputs.adminKey
     tags: tags
   }
 }

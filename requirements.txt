@@ -6,9 +6,9 @@ azure-identity>=1.15.0
 azure-mgmt-search>=9.1.0
 azure-mgmt-authorization>=4.0.0
 
-# Azure AI Foundry — Agent SDK
-azure-ai-projects==1.0.0
-azure-ai-agents>=1.2.0b6
+# Azure AI Foundry — Agent SDK (v2 preview: Foundry-native project support)
+azure-ai-projects>=2.0.0b4
+openai>=1.82.0
 
 # OneLake / Azure Storage
 azure-storage-file-datalake>=12.14.0

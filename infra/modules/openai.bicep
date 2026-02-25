@@ -39,6 +39,10 @@ param searchServiceEndpoint string
 @description('Resource ID of the AI Search service')
 param searchServiceId string
 
+@secure()
+@description('AI Search admin API key for connection authentication')
+param searchApiKey string
+
 param tags object = {}
 
 // ── AI Services account ───────────────────────────────────────────
@@ -56,6 +60,7 @@ resource aiServices 'Microsoft.CognitiveServices/accounts@2025-06-01' = {
   properties: {
     customSubDomainName: name
     publicNetworkAccess: 'Enabled'
+    disableLocalAuth: false
     allowProjectManagement: true
   }
 }
@@ -95,7 +100,9 @@ resource project 'Microsoft.CognitiveServices/accounts/projects@2025-06-01' = {
 
 // ── AI Search connection on the project ───────────────────────────
 // Enables the agent to discover and query the AI Search index via
-// the project's connections API.
+// the project's connections API. Uses ApiKey auth because the
+// Foundry-native project data-plane does not resolve AAD-only
+// connections for the agent runtime.
 resource searchConnection 'Microsoft.CognitiveServices/accounts/projects/connections@2025-06-01' = {
   parent: project
   name: searchConnectionName
@@ -103,7 +110,10 @@ resource searchConnection 'Microsoft.CognitiveServices/accounts/projects/connect
     category: 'CognitiveSearch'
     target: searchServiceEndpoint
     isSharedToAll: true
-    authType: 'AAD'
+    authType: 'ApiKey'
+    credentials: {
+      key: searchApiKey
+    }
     metadata: {
       ApiType: 'Azure'
       ResourceId: searchServiceId

@@ -15,6 +15,8 @@ Role assignments:
      (so the project can write to the search index)
   6. Foundry project identity -> Search Service Contributor on AI Search
      (so the project can manage search resources)
+  7. Foundry project identity -> Search Index Data Reader on AI Search
+     (so the agent runtime under the project identity can query the index)
 """
 
 from __future__ import annotations
@@ -165,7 +167,17 @@ def main() -> None:
         label="SearchServiceContributor",
     )
 
-    print("  Done! RBAC role assignments configured.")
+    # ── 7. Foundry project -> Search Index Data Reader on AI Search ──
+    print("  7. Foundry project -> Search Index Data Reader on AI Search...")
+    assign_role(
+        auth_client,
+        scope=search_service_id,
+        role_definition_id=ROLE_SEARCH_INDEX_DATA_READER,
+        principal_id=project_principal_id,
+        label="SearchIndexDataReader",
+    )
+
+    print("  Done! RBAC role assignments configured (7 assignments).")
     print("  Note: RBAC propagation may take up to 10 minutes.")
 
 
