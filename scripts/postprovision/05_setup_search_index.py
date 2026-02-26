@@ -115,7 +115,15 @@ def cleanup_old_knowledge_resources(
 def wait_for_ingestion(
     search_url: str, admin_key: str, ks_name: str, timeout: int = MAX_POLL_SECONDS
 ) -> bool:
-    """Poll knowledge source ingestion status until complete or timeout."""
+    """
+    Poll knowledge source ingestion status until complete or timeout.
+
+    The synchronizationStatus field returns "active" once the sync schedule
+    is running — it never transitions to "succeeded". Instead, we detect
+    completion by checking lastSynchronizationState:
+      - endTime is populated (sync finished)
+      - itemsUpdatesFailed == 0 (no failures)
+    """
     headers = {"api-key": admin_key, "Content-Type": "application/json"}
     endpoint = f"{search_url}/knowledgesources/{ks_name}/status"
     params = {"api-version": API_VERSION}
@@ -134,23 +142,44 @@ def wait_for_ingestion(
 
         data = resp.json()
         sync_status = data.get("synchronizationStatus", "unknown")
-        indexer_status = data.get("lastResult", {}).get("status", "unknown")
-        items_processed = data.get("lastResult", {}).get("itemsProcessed", 0)
+        last_sync = data.get("lastSynchronizationState", {})
+        end_time = last_sync.get("endTime")
+        items_processed = last_sync.get("itemsUpdatesProcessed", 0)
+        items_failed = last_sync.get("itemsUpdatesFailed", 0)
+
+        # Also check the legacy lastResult fields as fallback
+        last_result = data.get("lastResult", {})
+        indexer_status = last_result.get("status", "unknown")
+        indexer_items = last_result.get("itemsProcessed", 0)
 
         print(
             f"    Sync: {sync_status}, "
-            f"indexer: {indexer_status}, "
-            f"items: {items_processed}"
+            f"endTime: {end_time or 'pending'}, "
+            f"processed: {items_processed or indexer_items}, "
+            f"failed: {items_failed}"
         )
 
-        if sync_status in ("succeeded", "Succeeded"):
-            return True
+        # Primary detection: lastSynchronizationState.endTime is set
+        if end_time:
+            if items_failed == 0:
+                print(
+                    f"    Ingestion completed successfully! "
+                    f"{items_processed or indexer_items} items processed."
+                )
+                return True
+            else:
+                print(f"    [error] Ingestion completed with {items_failed} failures.")
+                print(f"    Full status: {json.dumps(data, indent=2)}")
+                return False
+
+        # Fallback: check if synchronizationStatus explicitly failed
         if sync_status in ("failed", "Failed"):
             print(f"    [error] Ingestion failed: {json.dumps(data, indent=2)}")
             return False
 
-        # Also check indexer-level status
+        # Fallback: check indexer-level status from lastResult
         if indexer_status in ("success", "Success"):
+            print(f"    Ingestion completed (indexer status: {indexer_status}).")
             return True
 
         time.sleep(poll_interval)

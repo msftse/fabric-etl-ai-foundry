@@ -15,6 +15,9 @@ from __future__ import annotations
 import subprocess
 import sys
 import os
+import time
+
+import requests
 
 # Add project root to path so we can import the helpers
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
@@ -98,12 +101,109 @@ def resolve_capacity_guid(fabric: FabricClient, env: dict[str, str]) -> str:
     sys.exit(1)
 
 
+def resume_fabric_capacity(env: dict[str, str]) -> None:
+    """
+    Resume the Fabric capacity if it's in a paused/suspended state.
+
+    Bicep-provisioned Fabric capacities start paused. We call the ARM
+    REST API to resume it before assigning a workspace.
+    """
+    from azure.identity import DefaultAzureCredential
+
+    capacity_arm_id = env.get("FABRIC_CAPACITY_ID", "")
+    if not capacity_arm_id or "/" not in capacity_arm_id:
+        # Not a full ARM ID — can't call resume; capacity may already be active
+        print("  [info] No full ARM capacity ID available; skipping resume.")
+        return
+
+    credential = DefaultAzureCredential()
+    token = credential.get_token("https://management.azure.com/.default")
+    headers = {
+        "Authorization": f"Bearer {token.token}",
+        "Content-Type": "application/json",
+    }
+
+    arm_api_version = "2023-11-01"
+
+    # First check current state
+    check_url = (
+        f"https://management.azure.com{capacity_arm_id}?api-version={arm_api_version}"
+    )
+    resp = requests.get(check_url, headers=headers)
+    if resp.status_code != 200:
+        print(
+            f"  [warn] Could not check capacity state: {resp.status_code} {resp.text[:200]}"
+        )
+        return
+
+    state = resp.json().get("properties", {}).get("state", "Unknown")
+    print(f"  Capacity state: {state}")
+
+    if state.lower() in ("active",):
+        print("  Capacity is already active — no resume needed.")
+        return
+
+    # Resume the capacity
+    resume_url = (
+        f"https://management.azure.com{capacity_arm_id}"
+        f"/resume?api-version={arm_api_version}"
+    )
+    print("  Resuming Fabric capacity (this may take a minute)...")
+    resp = requests.post(resume_url, headers=headers)
+
+    if resp.status_code in (200, 202):
+        # Poll until active (ARM returns 202 with Location header)
+        if resp.status_code == 202:
+            location = resp.headers.get("Location") or resp.headers.get(
+                "Azure-AsyncOperation"
+            )
+            if location:
+                deadline = time.time() + 300  # 5 min timeout
+                while time.time() < deadline:
+                    time.sleep(15)
+                    poll_resp = requests.get(location, headers=headers)
+                    if poll_resp.status_code == 200:
+                        poll_data = poll_resp.json()
+                        status = poll_data.get(
+                            "status", poll_data.get("properties", {}).get("state", "")
+                        )
+                        print(f"    Resume status: {status}")
+                        if status.lower() in ("succeeded", "active"):
+                            break
+                        if status.lower() in ("failed", "canceled"):
+                            print(f"    [error] Resume failed: {poll_data}")
+                            sys.exit(1)
+                    else:
+                        # Fallback: check capacity state directly
+                        break
+            else:
+                # No Location header — wait a fixed period
+                time.sleep(30)
+
+        # Verify active
+        resp = requests.get(check_url, headers=headers)
+        if resp.status_code == 200:
+            state = resp.json().get("properties", {}).get("state", "Unknown")
+            print(f"  Capacity state after resume: {state}")
+        print("  Capacity resumed successfully.")
+    elif resp.status_code == 409:
+        print("  Capacity is already active (409 Conflict).")
+    else:
+        print(
+            f"  [error] Failed to resume capacity: {resp.status_code} {resp.text[:300]}"
+        )
+        sys.exit(1)
+
+
 def main() -> None:
     env = load_azd_env()
     fabric = FabricClient()
 
     # ── 0. Resolve capacity GUID ──────────────────────────────────
     capacity_guid = resolve_capacity_guid(fabric, env)
+
+    # ── 0b. Resume capacity if paused ─────────────────────────────
+    resume_fabric_capacity(env)
 
     # ── 1. Find or create workspace ────────────────────────────────
     print(f"  Looking for workspace '{WORKSPACE_NAME}'...")
