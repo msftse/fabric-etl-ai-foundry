@@ -120,11 +120,12 @@ The index must declare `allowed_groups` as a **filterable** `Collection(Edm.Stri
 Key field definition:
 
 ```python
-SimpleField(
+SearchField(
     name="allowed_groups",
     type=SearchFieldDataType.Collection(SearchFieldDataType.String),
     filterable=True,
     retrievable=True,
+    searchable=False,
 )
 ```
 
@@ -138,7 +139,7 @@ When the AI Foundry agent (or any client) queries the index, it must pass the ca
 
 ```http
 POST https://<search-service>.search.windows.net/indexes/<index>/docs/search?api-version=2024-07-01
-Authorization: Bearer <SERVICE_API_KEY>
+api-key: <SERVICE_API_KEY>
 Content-Type: application/json
 
 {
@@ -170,7 +171,9 @@ def build_security_filter(user_groups: list[str]) -> str:
         # If no groups provided, only return publicly accessible documents
         return "allowed_groups/any(g: g eq 'all')"
 
-    clauses = [f"allowed_groups/any(g: g eq '{g}')" for g in user_groups]
+    # Sanitize: escape single quotes to prevent OData injection ('' is the OData escape for ')
+    safe_groups = [g.replace("'", "''") for g in user_groups]
+    clauses = [f"allowed_groups/any(g: g eq '{g}')" for g in safe_groups]
     return " or ".join(clauses)
 
 
@@ -257,7 +260,7 @@ This post-provision script demonstrates the full security filter setup:
 
 1. Creates a new index schema that includes the `allowed_groups` field.
 2. Pushes sample documents with security metadata into the index.
-3. Runs a test query with and without the security filter to verify enforcement.
+3. Runs a test query using the security filter to verify enforcement.
 
 Run it after `06_create_agent.py`:
 
@@ -357,7 +360,7 @@ After running `07_setup_security_filters.py`, verify that the filter is working:
 ```bash
 # Documents visible to team-data-engineering
 curl -s -X POST \
-  "https://<SEARCH_NAME>.search.windows.net/indexes/confluence-secure-index/docs/search?api-version=2024-07-01" \
+  "https://<SEARCH_NAME>.search.windows.net/indexes/confluence-secure-demo/docs/search?api-version=2024-07-01" \
   -H "api-key: <ADMIN_KEY>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -368,7 +371,7 @@ curl -s -X POST \
 
 # Documents visible only to team-finance (should be a subset)
 curl -s -X POST \
-  "https://<SEARCH_NAME>.search.windows.net/indexes/confluence-secure-index/docs/search?api-version=2024-07-01" \
+  "https://<SEARCH_NAME>.search.windows.net/indexes/confluence-secure-demo/docs/search?api-version=2024-07-01" \
   -H "api-key: <ADMIN_KEY>" \
   -H "Content-Type: application/json" \
   -d '{
