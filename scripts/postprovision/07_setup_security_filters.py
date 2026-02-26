@@ -244,7 +244,7 @@ def build_security_filter(user_groups: list[str]) -> str:
     if not user_groups:
         return "allowed_groups/any(g: g eq 'all')"
 
-    # Sanitize: escape single quotes to prevent OData injection ('' is the OData escape for ')
+    # Sanitize: escape single quotes to prevent OData injection (two single quotes '' escape a single quote ' in OData)
     safe_groups = [g.replace("'", "''") for g in user_groups]
     clauses = [f"allowed_groups/any(g: g eq '{g}')" for g in safe_groups]
     return " or ".join(clauses)
