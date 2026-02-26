@@ -142,13 +142,13 @@ def wait_for_ingestion(
 
         data = resp.json()
         sync_status = data.get("synchronizationStatus", "unknown")
-        last_sync = data.get("lastSynchronizationState", {})
+        last_sync = data.get("lastSynchronizationState") or {}
         end_time = last_sync.get("endTime")
         items_processed = last_sync.get("itemsUpdatesProcessed", 0)
         items_failed = last_sync.get("itemsUpdatesFailed", 0)
 
         # Also check the legacy lastResult fields as fallback
-        last_result = data.get("lastResult", {})
+        last_result = data.get("lastResult") or {}
         indexer_status = last_result.get("status", "unknown")
         indexer_items = last_result.get("itemsProcessed", 0)
 

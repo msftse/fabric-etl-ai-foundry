@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import sys
 import os
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 from _helpers import load_azd_env, require_env
@@ -192,23 +193,52 @@ def main() -> None:
         project_connection_id=mcp_connection_name,
     )
 
-    try:
-        agent = client.agents.create_version(
-            agent_name=AGENT_NAME,
-            definition=PromptAgentDefinition(
-                model=AGENT_MODEL,
-                instructions=AGENT_INSTRUCTIONS,
-                tools=[mcp_kb_tool],
-            ),
-            description="Confluence data analyst with Foundry IQ knowledge base grounding",
+    # Retry loop: project data-plane can take up to 30 minutes to
+    # become available after Bicep provisioning. We poll with
+    # increasing delays: 30s x2, 60s x2, then 120s until timeout.
+    max_retries = 20
+    retry_delays = [30, 30, 60, 60] + [120] * 16  # ~35 min total
+    agent = None
+
+    for attempt in range(max_retries):
+        try:
+            agent = client.agents.create_version(
+                agent_name=AGENT_NAME,
+                definition=PromptAgentDefinition(
+                    model=AGENT_MODEL,
+                    instructions=AGENT_INSTRUCTIONS,
+                    tools=[mcp_kb_tool],
+                ),
+                description="Confluence data analyst with Foundry IQ knowledge base grounding",
+            )
+            print(f"    Agent created! ID: {agent.id}")
+            print(f"    Name: {agent.name}")
+            print(f"    Version: {agent.version}")
+            break
+        except Exception as e:
+            err_msg = str(e)
+            if "Project not found" in err_msg or "NotFound" in err_msg:
+                delay = retry_delays[min(attempt, len(retry_delays) - 1)]
+                elapsed = sum(retry_delays[:attempt]) if attempt > 0 else 0
+                print(
+                    f"    [retry {attempt + 1}/{max_retries}] "
+                    f"Project data-plane not ready yet (~{elapsed}s elapsed). "
+                    f"Waiting {delay}s..."
+                )
+                time.sleep(delay)
+            else:
+                print(f"    [error] Agent creation failed: {e}")
+                return
+
+    if agent is None:
+        total_wait = sum(retry_delays)
+        print(
+            f"    [error] Project data-plane did not become available "
+            f"after {total_wait}s of waiting."
         )
-        print(f"    Agent created! ID: {agent.id}")
-        print(f"    Name: {agent.name}")
-        print(f"    Version: {agent.version}")
-    except Exception as e:
-        print(f"    [error] Agent creation failed: {e}")
-        print("    This may happen if RBAC roles haven't propagated yet.")
-        print("    Wait 5-10 minutes and re-run this script.")
+        print(
+            "    Run this script manually later: python scripts/postprovision/06_create_agent.py"
+        )
         return
 
     # ── 3. Verification query ──────────────────────────────────────
