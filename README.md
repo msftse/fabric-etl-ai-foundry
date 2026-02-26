@@ -62,7 +62,7 @@ azd up
 | Key Vault | `keyvault.bicep` | Secrets for AI Foundry Hub |
 | AI Foundry Hub + Project | `ai-foundry.bicep` | AI agent hosting environment |
 
-**Phase 2 — `postprovision` hooks** run 7 Python scripts:
+**Phase 2 — `postprovision` hooks** run 6 Python scripts:
 
 | Script | Purpose |
 |--------|---------|
@@ -72,7 +72,6 @@ azd up
 | `04_setup_rbac.py` | Grant AI Search managed identity access to Fabric + OpenAI |
 | `05_setup_search_index.py` | Create AI Search index, OneLake data source, indexer |
 | `06_create_agent.py` | Create AI Foundry agent with AzureAISearchTool |
-| `07_setup_security_filters.py` | Demonstrate document-level access control with security filters |
 
 ### Tear Down
 
@@ -153,11 +152,7 @@ fabric-etl-ai-foundry/
 │   ├── 03_seed_and_run_etl.py          # Confluence seed + pipeline trigger
 │   ├── 04_setup_rbac.py                # RBAC role assignments
 │   ├── 05_setup_search_index.py        # AI Search index/datasource/indexer
-│   ├── 06_create_agent.py              # AI Foundry agent creation
-│   └── 07_setup_security_filters.py    # Document-level access control demo
-├── docs/
-│   ├── security-index-access.md        # Security module: document-level access control
-│   └── images/                         # Architecture screenshots
+│   └── 06_create_agent.py              # AI Foundry agent creation
 ├── notebooks/
 │   ├── bronze_confluence_extract.ipynb  # Bronze notebook ({{PLACEHOLDER}} tokens)
 │   ├── silver_confluence_transform.ipynb # Silver notebook
@@ -496,8 +491,6 @@ Below is the agent playground after successful setup — the knowledge base retr
 | Indexer warnings: `SplitSkill input missing` | Side-effect of Parquet files having no extractable text | Normal for Parquet files, no action needed |
 | Lakehouse creation fails with "invalid name" | Hyphens in lakehouse name | Use only alphanumeric characters (e.g. `confluencelakehouse`) |
 | Workspace doesn't support managed access | Using personal "My workspace" | Create a named workspace (Step 1) |
-| Security filter returns no results | User groups not present in `allowed_groups` field | Verify group names match exactly; always include `'all'` in effective groups |
-| Security filter test FAIL in script 07 | Index propagation delay | Increase the `time.sleep` value in `07_setup_security_filters.py` before re-running |
 
 #### Checking Indexer Status via API
 
@@ -586,59 +579,6 @@ The AI Foundry agent can be configured with:
 - **Structured output** mode returning `DataInsight` Pydantic models
 - **Streaming** for real-time responses
 - **Multi-turn threads** for conversational analysis
-
-## Securing Data Access in the Index
-
-By default every user with access to the AI Foundry agent can retrieve any indexed document. The security module adds **document-level access control** so that query results are trimmed to documents the caller is authorized to see.
-
-Full documentation: [docs/security-index-access.md](docs/security-index-access.md)
-
-### Approach: Security Filters (String Comparison)
-
-A filterable `allowed_groups` field is added to each indexed document at the Gold-layer ETL step. At query time the application injects an OData `$filter` expression that restricts results to documents tagged with the caller's group identifiers.
-
-```
-Gold CSV (OneLake)            AI Search Index            Query
-  allowed_groups:               allowed_groups            $filter:
-  ["team-data-eng", "all"]  -->  (filterable)  -->  allowed_groups/any(g: g eq 'team-data-eng')
-                                                     or allowed_groups/any(g: g eq 'all')
-```
-
-Key components:
-
-| Component | Location | What It Does |
-|---|---|---|
-| Security field definition | `07_setup_security_filters.py` | Creates `Collection(Edm.String)` field with `filterable: true` |
-| Sample documents | `07_setup_security_filters.py` | Pushes Confluence-style docs with group tags; verifies filter enforcement |
-| OData filter builder | `07_setup_security_filters.py` | Generates `allowed_groups/any(g: g eq '...')` expressions |
-| Group-to-space mapping | `docs/security-index-access.md` | Example mapping to stamp groups onto Gold-layer CSV |
-| Entra group resolution | `docs/security-index-access.md` | Microsoft Graph API pattern to retrieve user group membership at runtime |
-
-### Running the Security Demo
-
-After `azd up` completes (or manually after step 06):
-
-```bash
-python scripts/postprovision/07_setup_security_filters.py
-```
-
-The script creates a `confluence-secure-demo` index, pushes five sample documents with different group restrictions, and runs three test scenarios to confirm security trimming works correctly.
-
-### Upgrade Path: Native RBAC Enforcement (Preview)
-
-For production deployments on Azure Data Lake Storage Gen2 (the backing store for OneLake), Azure AI Search supports **native POSIX-like ACL and RBAC scope enforcement** (preview). This eliminates the need to manually tag documents with group identifiers — the service pulls ACLs directly from ADLS Gen2 during indexing and enforces them at query time using the caller's Entra token:
-
-```http
-POST /indexes/<index>/docs/search?api-version=2025-11-01-preview
-Authorization: Bearer <search-rbac-token>
-x-ms-query-source-authorization: Bearer <user-entra-token>
-```
-
-See [docs/security-index-access.md#upgrading-to-native-rbac-scopes](docs/security-index-access.md#upgrading-to-native-rbac-scopes) for the full upgrade guide.
-
-**References:**
-- [Document-level access control — Azure AI Search](https://learn.microsoft.com/en-us/azure/search/search-document-level-access-overview)
-- [Query-time ACL and RBAC enforcement — Azure AI Search](https://learn.microsoft.com/en-us/azure/search/search-query-access-control-rbac-enforcement)
 
 ## Key Technologies
 
