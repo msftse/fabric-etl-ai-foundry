@@ -12,6 +12,24 @@ retrieval pipeline:
   5. Print the MCP endpoint URL for the agent script
 
 Requires azure-search-documents>=11.7.0b2.
+
+Security note:
+  The auto-generated index does not include document-level security fields.
+  To add security trimming on top of the knowledge source, run:
+
+      python scripts/postprovision/07_setup_security_filters.py
+
+  That script creates a companion 'confluence-secure-demo' index with an
+  'allowed_groups' Collection(Edm.String) filterable field and demonstrates
+  query-time security filter enforcement.
+
+  For the full security module documentation, including the upgrade path to
+  native RBAC enforcement (preview), see:
+      docs/security-index-access.md
+
+  References:
+    https://learn.microsoft.com/en-us/azure/search/search-document-level-access-overview
+    https://learn.microsoft.com/en-us/azure/search/search-query-access-control-rbac-enforcement
 """
 
 from __future__ import annotations
