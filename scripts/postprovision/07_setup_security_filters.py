@@ -36,6 +36,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 from _helpers import load_azd_env, require_env
 
 from azure.core.credentials import AzureKeyCredential
+from azure.core.exceptions import ResourceNotFoundError
 from azure.search.documents import SearchClient
 from azure.search.documents.indexes import SearchIndexClient
 from azure.search.documents.indexes.models import (
@@ -51,7 +52,6 @@ from azure.identity import DefaultAzureCredential
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 DEMO_INDEX_NAME = "confluence-secure-demo"
-API_VERSION = "2024-07-01"
 
 # Sample space-to-group mapping that mirrors what a Gold-layer ETL step would
 # stamp onto each document. In production, derive this from your identity
@@ -64,9 +64,10 @@ SPACE_GROUP_MAP: dict[str, list[str]] = {
 }
 
 # Sample documents representing Gold-layer Confluence data.
-# The 'allowed_groups' field is a list of group identifiers — any user
-# whose group list overlaps with this list is allowed to see the document.
-SAMPLE_DOCUMENTS = [
+# The 'allowed_groups' field is derived from SPACE_GROUP_MAP so the mapping
+# stays consistent — any update to SPACE_GROUP_MAP is automatically reflected
+# in the sample data without manual edits.
+_RAW_DOCUMENTS = [
     {
         "id": "page-001",
         "title": "ETL Pipeline Architecture",
@@ -77,7 +78,6 @@ SAMPLE_DOCUMENTS = [
         ),
         "author": "alice@contoso.com",
         "word_count": 120,
-        "allowed_groups": ["team-data-engineering", "all"],
     },
     {
         "id": "page-002",
@@ -89,7 +89,6 @@ SAMPLE_DOCUMENTS = [
         ),
         "author": "bob@contoso.com",
         "word_count": 95,
-        "allowed_groups": ["team-platform", "all"],
     },
     {
         "id": "page-003",
@@ -101,7 +100,6 @@ SAMPLE_DOCUMENTS = [
         ),
         "author": "carol@contoso.com",
         "word_count": 210,
-        "allowed_groups": ["team-finance"],
     },
     {
         "id": "page-004",
@@ -113,7 +111,6 @@ SAMPLE_DOCUMENTS = [
         ),
         "author": "dave@contoso.com",
         "word_count": 450,
-        "allowed_groups": ["team-hr"],
     },
     {
         "id": "page-005",
@@ -125,33 +122,36 @@ SAMPLE_DOCUMENTS = [
         ),
         "author": "alice@contoso.com",
         "word_count": 80,
-        "allowed_groups": ["team-data-engineering", "team-platform", "all"],
     },
 ]
 
+# Stamp each document with its allowed_groups derived from SPACE_GROUP_MAP.
+# Spaces not listed in the map default to ["all"] (publicly accessible).
+SAMPLE_DOCUMENTS = [
+    {**doc, "allowed_groups": SPACE_GROUP_MAP.get(doc["space_key"], ["all"])}
+    for doc in _RAW_DOCUMENTS
+]
+
 # Test scenarios: each entry defines a simulated user and their group membership.
-# The expected_ids list should match the documents that user is allowed to see.
+# Expected visibility is derived at runtime from SAMPLE_DOCUMENTS in run_security_test().
 TEST_SCENARIOS = [
     {
         "user": "alice (team-data-engineering)",
         "groups": ["team-data-engineering"],
-        "expected_ids": {"page-001", "page-002", "page-005"},
-        # page-002 visible because it has 'all'; page-001 and page-005 direct match
+        # Effective groups (after adding 'all'): ['team-data-engineering', 'all']
+        # Sees: page-001 (team-data-engineering), page-002 (all), page-005 (team-data-engineering + all)
     },
     {
         "user": "carol (team-finance)",
         "groups": ["team-finance"],
-        "expected_ids": {"page-003"},
-        # Only the finance page — none of the 'all' docs are explicitly in 'all'
-        # Wait — page-001, page-002, page-005 have 'all'. Let's be precise:
-        # carol sees: page-001 (has 'all'), page-002 (has 'all'), page-003 (team-finance), page-005 (has 'all')
-        # Correction handled in run_security_test below.
+        # Effective groups (after adding 'all'): ['team-finance', 'all']
+        # Sees: page-001 (all), page-002 (all), page-003 (team-finance), page-005 (all)
     },
     {
         "user": "eve (no group — public only)",
         "groups": ["all"],
-        "expected_ids": {"page-001", "page-002", "page-005"},
-        # Only documents tagged with 'all'
+        # Effective groups: ['all']
+        # Sees: page-001 (all), page-002 (all), page-005 (all)
     },
 ]
 
@@ -244,7 +244,7 @@ def build_security_filter(user_groups: list[str]) -> str:
     if not user_groups:
         return "allowed_groups/any(g: g eq 'all')"
 
-    # Sanitize: strip single quotes to prevent OData injection
+    # Sanitize: escape single quotes to prevent OData injection (two single quotes '' escape a single quote ' in OData)
     safe_groups = [g.replace("'", "''") for g in user_groups]
     clauses = [f"allowed_groups/any(g: g eq '{g}')" for g in safe_groups]
     return " or ".join(clauses)
@@ -260,8 +260,12 @@ def run_security_test(
     """
     Run a search query with the security filter applied for a given scenario.
 
-    Returns (actual_ids, passed) where passed is True if the result matches
-    the expected document IDs for groups that include 'all'.
+    Expected document IDs are derived at runtime by computing the overlap
+    between each document's 'allowed_groups' in SAMPLE_DOCUMENTS and the
+    scenario's effective_groups (user groups plus 'all').
+
+    Returns (actual_ids, passed) where passed is True if the actual result
+    set matches the expected set derived from SAMPLE_DOCUMENTS.
     """
     groups = scenario["groups"]
 
@@ -342,7 +346,7 @@ def main() -> None:
     try:
         index_client.delete_index(DEMO_INDEX_NAME)
         print(f"  Deleted existing index '{DEMO_INDEX_NAME}'.")
-    except Exception:
+    except ResourceNotFoundError:
         pass  # Index does not exist yet — that is fine
 
     schema = build_index_schema()
