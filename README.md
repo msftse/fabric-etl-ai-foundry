@@ -85,7 +85,7 @@ azd down --purge
 This repo includes a `.devcontainer` configuration. Click **Code > Codespaces > New codespace** on GitHub to get a ready-to-use environment with `azd`, `az`, and Python pre-installed.
 
 ## Full Target Architecture
-
+```
 ┌─────────────────────────────────────────────────────────────┐
 │                     DATA SOURCES                            │
 │  Confluence │ SharePoint │ GitHub Docs │ PDFs │ SharePoint  │
@@ -180,6 +180,7 @@ This repo includes a `.devcontainer` configuration. Click **Code > Codespaces > 
 │  ├── Power Apps / Power Automate (Logic Apps connector)     │
 │  └── Direct SDK integration (Python / .NET / Java)         │
 └─────────────────────────────────────────────────────────────┘
+```
 
 ## Architecture
 
