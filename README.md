@@ -84,6 +84,103 @@ azd down --purge
 
 This repo includes a `.devcontainer` configuration. Click **Code > Codespaces > New codespace** on GitHub to get a ready-to-use environment with `azd`, `az`, and Python pre-installed.
 
+## Full Target Architecture
+
+┌─────────────────────────────────────────────────────────────┐
+│                     DATA SOURCES                            │
+│  Confluence │ SharePoint │ GitHub Docs │ PDFs │ SharePoint  │
+│  Jira       │ Databases  │ Ticket Sys  │ Metadata Tables    │
+└────────────────────────┬────────────────────────────────────┘
+                         │ APIs / DB Exports / Webhooks
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  INGESTION LAYER (ETL)                      │
+│   Microsoft Fabric Data Factory (Pipelines + Dataflows)     │
+│   Azure Data Factory (for complex/legacy sources)           │
+│   Azure Event Hub / Logic Apps (for real-time triggers)     │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│         SHARED KNOWLEDGE STORAGE — ADLS Gen2                │
+│  Bronze Zone │ Silver Zone │ Gold Zone                      │
+│  (raw/replay)│ (cleaned)   │ (chunked, enriched, RAG-ready) │
+│                                                             │
+│  Format: Delta Parquet (open format, Fabric-compatible)     │
+│  Governance: Microsoft Purview (labels, lineage, audit)     │
+└────────────────────────┬────────────────────────────────────┘
+                         │ Gold layer pushes/upserts
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│              FOUNDRY IQ KNOWLEDGE LAYER                     │
+│         (Built on Azure AI Search — NEW in 2025)            │
+│                                                             │
+│  Knowledge Bases (topic-centric, reusable across agents)    │
+│  ├── KB: Employee Policies    (SharePoint source)           │
+│  ├── KB: Engineering Docs     (Confluence + GitHub)         │
+│  ├── KB: Support Knowledge    (Jira + Ticket DB)            │
+│  └── KB: Product Data         (Structured DB + PDFs)        │
+│                                                             │
+│  Per Knowledge Base:                                        │
+│  ├── Indexed Sources (vectorized, chunked, hybrid search)   │
+│  ├── Remote Sources (live SharePoint, OneLake, web)         │
+│  ├── Agentic Retrieval Engine (query planning, multi-hop)   │
+│  └── Document-Level ACL (Entra ID + Purview labels)         │
+│                                                             │
+│  Retrieval Strategy: Hybrid Search (BM25 + ANN vectors)     │
+│       + Reciprocal Rank Fusion (RRF)                        │
+│       + Semantic Re-ranking (cross-encoder)                 │
+│       + Query Decomposition (LLM-driven sub-queries)        │
+└────────────────────────┬────────────────────────────────────┘
+                         │ Single knowledge endpoint
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│           MICROSOFT FOUNDRY AGENT SERVICE                   │
+│     (Orchestration, Execution, Memory, Governance)          │
+│                                                             │
+│  Agent Types:                                               │
+│  ├── Retrieval Agent (queries Foundry IQ Knowledge Bases)   │
+│  ├── Structured Data Agent (SQL/APIs for Jira, DB queries)  │
+│  ├── Orchestrator Agent (plans multi-agent workflows)       │
+│  └── Synthesis Agent (answer generation with citations)     │
+│                                                             │
+│  Runtime:                                                   │
+│  ├── Microsoft Agent Framework (AutoGen + Semantic Kernel)  │
+│  ├── Persistent State: Azure Cosmos DB                      │
+│  ├── Tool Integrations: Azure Functions, Logic Apps, MCP    │
+│  └── Models: GPT-4o, GPT-4.1, o3 (or Claude Sonnet/Opus)   │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│              SECURITY & GOVERNANCE PLANE                    │
+│  ├── Entra ID: Identity for users, agents, managed identity │
+│  ├── RBAC: Ingestion / Index Mgmt / Query roles separated   │
+│  ├── Microsoft Purview: Sensitivity labels, lineage, audit  │
+│  ├── Private Endpoints + VNet Integration                   │
+│  ├── Customer Managed Keys (CMK) for encryption at rest     │
+│  └── Prompt Shields, PII Detection, Task Adherence guards   │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│           OBSERVABILITY & OPERATIONS PLANE                  │
+│  ├── Azure Monitor + Application Insights                   │
+│  ├── Foundry Control Plane (agent tracing, eval, audit)     │
+│  ├── OpenTelemetry (standardized cross-agent tracing)       │
+│  ├── Evaluation: Foundry Evaluator (faithfulness, recall)   │
+│  └── Cost Governance: Azure Cost Management per workload    │
+└─────────────────────────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│          CONSUMER SURFACES (RAG Endpoints)                  │
+│  ├── Internal REST API (FastAPI / APIM gateway)             │
+│  ├── Teams / M365 Copilot (1-click publish from Foundry)    │
+│  ├── Power Apps / Power Automate (Logic Apps connector)     │
+│  └── Direct SDK integration (Python / .NET / Java)         │
+└─────────────────────────────────────────────────────────────┘
+
 ## Architecture
 
 ```
